@@ -20,7 +20,7 @@ from . import prompts, tokenizer
 from .blocks import Block, Context, OBSERVATION, QUESTION
 from .data import Example
 from .llm import LLMBackend
-from .policies import CompressionPolicy
+from .policies import Policy
 from .retriever import make_retriever
 from .scoring import make_scorer
 from .summarizer import Summarizer
@@ -120,7 +120,7 @@ class ReActAgent:
     def run(
         self,
         example: Example,
-        policy: CompressionPolicy,
+        policy: Policy,
         budget: int,
         summary_max_words: int = 40,
     ) -> RunResult:

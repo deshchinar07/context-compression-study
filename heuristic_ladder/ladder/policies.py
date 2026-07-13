@@ -27,10 +27,10 @@ Fairness invariants enforced here:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import Optional, Union
 
-from .blocks import Block, Context, OBSERVATION, QUESTION, SUMMARY
+from .blocks import Block, Context, OBSERVATION, SUMMARY
 from .scoring import LexicalScorer
 from .summarizer import Summarizer
 from . import tokenizer
@@ -43,34 +43,7 @@ class CompressionStats:
     summarized: int = 0    # summarize LLM calls made (H3 only)
 
 
-class CompressionPolicy:
-    """Base class. Subclasses implement ``on_append``."""
-
-    name: str = "base"
-    uses_gold: bool = False
-
-    def __init__(self):
-        self.stats = CompressionStats()
-
-    def on_append(
-        self,
-        ctx: Context,
-        pending: Block,
-        *,
-        scorer: Optional[LexicalScorer] = None,
-        summarizer: Optional[Summarizer] = None,
-        query: str = "",
-    ) -> None:
-        raise NotImplementedError
-
-    # shared helpers -------------------------------------------------------
-    @staticmethod
-    def _evictable(ctx: Context) -> List[Block]:
-        """Evidence blocks only; the question is never touched by H1+ rungs."""
-        return [b for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
-
-
-class H0(CompressionPolicy):
+class H0:
     """The floor. No timing, no selection.
 
     Appends unconditionally (never checks the budget first), then -- only if that
@@ -80,8 +53,12 @@ class H0(CompressionPolicy):
     """
 
     name = "H0"
+    uses_gold = False
 
-    def on_append(self, ctx, pending, *, scorer=None, summarizer=None, query=""):
+    def __init__(self):
+        self.stats = CompressionStats()
+
+    def on_append(self, ctx: Context, pending: Block, *, scorer: Optional[LexicalScorer] = None, summarizer: Optional[Summarizer] = None, query: str = "") -> None:
         ctx.blocks.append(pending)
         fired = False
         while ctx.used() > ctx.budget and ctx.blocks:
@@ -91,7 +68,7 @@ class H0(CompressionPolicy):
         self.stats.triggered += int(fired)
 
 
-class H1(CompressionPolicy):
+class H1:
     """Timing, alone. Proactive budget check + FIFO drop-oldest, question pinned.
 
     Same dumb selection rule as H0's panic response (drop oldest), but triggered
@@ -100,11 +77,16 @@ class H1(CompressionPolicy):
     """
 
     name = "H1"
+    uses_gold = False
 
-    def on_append(self, ctx, pending, *, scorer=None, summarizer=None, query=""):
+    def __init__(self):
+        self.stats = CompressionStats()
+
+    def on_append(self, ctx: Context, pending: Block, *, scorer: Optional[LexicalScorer] = None, summarizer: Optional[Summarizer] = None, query: str = "") -> None:
         fired = False
         while ctx.used() + pending.n_tokens > ctx.budget:
-            candidates = self._evictable(ctx)
+            # Evidence only; the question is never touched.
+            candidates = [b for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
             if not candidates:
                 break  # only the (pinned) question is left; accept rare overflow
             ctx.remove(candidates[0])  # first in list == oldest
@@ -114,7 +96,7 @@ class H1(CompressionPolicy):
         self.stats.triggered += int(fired)
 
 
-class H2(CompressionPolicy):
+class H2:
     """Selection gets a brain. Same timing as H1; drop LEAST query-relevant first.
 
     The H1->H2 gap isolates whether *what* you drop matters, holding timing fixed.
@@ -122,12 +104,16 @@ class H2(CompressionPolicy):
     """
 
     name = "H2"
+    uses_gold = False
 
-    def on_append(self, ctx, pending, *, scorer=None, summarizer=None, query=""):
+    def __init__(self):
+        self.stats = CompressionStats()
+
+    def on_append(self, ctx: Context, pending: Block, *, scorer: Optional[LexicalScorer] = None, summarizer: Optional[Summarizer] = None, query: str = "") -> None:
         assert scorer is not None, "H2 requires a relevance scorer"
         fired = False
         while ctx.used() + pending.n_tokens > ctx.budget:
-            candidates = self._evictable(ctx)
+            candidates = [b for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
             if not candidates:
                 break
             # lowest relevance first; tie-break oldest (earliest in list).
@@ -142,7 +128,7 @@ class H2(CompressionPolicy):
         self.stats.triggered += int(fired)
 
 
-class H3(CompressionPolicy):
+class H3:
     """The fair strong heuristic. H2's ranking + two additions:
 
       * anchors: never drop the question or the most-recent observation;
@@ -154,18 +140,30 @@ class H3(CompressionPolicy):
     """
 
     name = "H3"
+    uses_gold = False
 
     def __init__(self, summary_max_words: int = 40):
-        super().__init__()
+        self.stats = CompressionStats()
         self.summary_max_words = summary_max_words
 
-    def on_append(self, ctx, pending, *, scorer=None, summarizer=None, query=""):
+    def on_append(
+        self,
+        ctx: Context,
+        pending: Block,
+        *,
+        scorer: Optional[LexicalScorer] = None,
+        summarizer: Optional[Summarizer] = None,
+        query: str = "",
+    ) -> None:
         assert scorer is not None and summarizer is not None, "H3 needs scorer+summarizer"
         fired = False
         # The most-recent observation already in context is an anchor.
         while ctx.used() + pending.n_tokens > ctx.budget:
             anchor = ctx.most_recent_observation()
-            candidates = [b for b in self._evictable(ctx) if b is not anchor]
+            candidates = [
+                b for b in ctx.blocks
+                if b.role in (OBSERVATION, SUMMARY) and b is not anchor
+            ]
             if not candidates:
                 break
             victim = min(
@@ -192,7 +190,7 @@ class H3(CompressionPolicy):
         self.stats.triggered += int(fired)
 
 
-class Oracle(CompressionPolicy):
+class Oracle:
     """Not a real policy -- a ceiling. Perfect selection at H2 timing.
 
     Identical to H2 (same proactive timing, question pinned), except the relevance
@@ -207,19 +205,29 @@ class Oracle(CompressionPolicy):
     name = "Oracle"
     uses_gold = True
 
-    @staticmethod
-    def _gold_score(b: Block) -> float:
-        return 1.0 if b.is_supporting else 0.0
+    def __init__(self):
+        self.stats = CompressionStats()
 
-    def on_append(self, ctx, pending, *, scorer=None, summarizer=None, query=""):
+    def on_append(
+        self,
+        ctx: Context,
+        pending: Block,
+        *,
+        scorer: Optional[LexicalScorer] = None,
+        summarizer: Optional[Summarizer] = None,
+        query: str = "",
+    ) -> None:
         fired = False
         while ctx.used() + pending.n_tokens > ctx.budget:
-            candidates = self._evictable(ctx)
+            candidates = [b for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
             if not candidates:
                 break
             victim = min(
                 candidates,
-                key=lambda b: (self._gold_score(b), ctx.blocks.index(b)),
+                key=lambda b: (
+                    1.0 if b.is_supporting else 0.0,
+                    ctx.blocks.index(b),
+                ),
             )
             ctx.remove(victim)
             self.stats.dropped += 1
@@ -230,8 +238,10 @@ class Oracle(CompressionPolicy):
 
 LADDER = {"H0": H0, "H1": H1, "H2": H2, "H3": H3, "Oracle": Oracle}
 
+Policy = Union[H0, H1, H2, H3, Oracle]
 
-def build_policy(name: str, summary_max_words: int = 40) -> CompressionPolicy:
+
+def build_policy(name: str, summary_max_words: int = 40) -> Policy:
     if name not in LADDER:
         raise ValueError(f"unknown policy {name!r}; choose from {list(LADDER)}")
     if name == "H3":
