@@ -64,9 +64,27 @@ CONTINUE_CUE = (
     "<search>...</search> or <answer>...</answer>."
 )
 
+# Used when the model burned its turn inside <think> without emitting an action.
+# Paired with an assistant prefill of <answer> so the model continues in-answer.
+COMMIT_CUE = (
+    "\nStop reasoning. Using the information above, give the final short answer now."
+)
+
 FORCE_ANSWER_CUE = (
-    "\nYou must now answer using only the information above. Do NOT reason further. "
-    "Output only the final answer(s) inside <answer> and </answer>, nothing else."
+    "\nCRITICAL: Using only the information above, output ONLY the final "
+    "answer(s) inside <answer> and </answer>. "
+    "Do NOT write <think>, do NOT search, do NOT explain. "
+    "Example: <answer>Beijing</answer>"
+)
+
+FORCE_ANSWER_RETRY_CUE = (
+    "\nYour previous reply was invalid. Reply with exactly one line of the form "
+    "<answer>ANSWER</answer> and nothing else."
+)
+
+FORCE_ANSWER_SYSTEM = (
+    "You extract short factual answers. Reply with only "
+    "<answer>...</answer>. Never use <think> or any other tags."
 )
 
 

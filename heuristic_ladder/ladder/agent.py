@@ -13,10 +13,10 @@ cross-rung comparison legitimate.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import Optional
 
-from . import prompts, tokenizer
+from . import prompts
 from .blocks import Block, Context, OBSERVATION, QUESTION
 from .data import Example
 from .llm import LLMBackend
@@ -95,6 +95,34 @@ def _parse_action(text: str):
     return "search", (m.group(1).strip() if m else "")
 
 
+def _force_answer(backend: LLMBackend, ctx: Context) -> str:
+    """Last-resort answer extraction when the ReAct loop never committed.
+
+    Qwen often ignores a soft force cue and burns max_tokens inside <think>.
+    Prefilling the assistant turn with ``<answer>`` makes the model continue
+    inside the answer span instead of opening a think block.
+    """
+    out = backend.complete(
+        ctx.render_prompt() + prompts.FORCE_ANSWER_CUE,
+        stop=["</answer>"],
+        max_tokens=64,
+        system=prompts.FORCE_ANSWER_SYSTEM,
+        assistant_prefix="<answer>",
+    )
+    pred = _clean_answer(out)
+    if pred:
+        return pred
+    # Rare: provider rejected prefill or returned empty -- one plain retry.
+    out = backend.complete(
+        ctx.render_prompt() + prompts.FORCE_ANSWER_RETRY_CUE,
+        stop=["</answer>"],
+        max_tokens=64,
+        system=prompts.FORCE_ANSWER_SYSTEM,
+        assistant_prefix="<answer>",
+    )
+    return _clean_answer(out)
+
+
 class ReActAgent:
     def __init__(
         self,
@@ -158,11 +186,68 @@ class ReActAgent:
         n_searches = 0
         n_stale = 0
         step = 0
+        commit_nudge_used = False
+
+        def apply_search(payload: str) -> bool:
+            """Handle a <search> action. Return True to continue the loop, False to stop."""
+            nonlocal n_searches, n_stale, peak
+            n_searches += 1
+            hits = retriever.search(payload, topk=self.topk, exclude_idx=retrieved_idx)
+            new_hits = [p for p in hits if p.idx not in retrieved_idx]
+            if not new_hits:
+                n_stale += 1
+                return n_stale < 2  # stop after 2 stale searches
+            for p in new_hits:
+                retrieved_idx.add(p.idx)
+                # Under 'corpus' scope the passage is an unlabeled corpus doc;
+                # its gold status is decided here by title match. Under 'pool'
+                # scope the dataset label is authoritative (identical result,
+                # since a supporting paragraph's title is a gold title).
+                is_supporting = (
+                    (p.title in gold_titles) if label_by_title else p.is_supporting
+                )
+                if is_supporting:
+                    retrieved_gold_titles.add(p.title)
+                pending = Block(
+                    id=ctx.next_id(),
+                    role=OBSERVATION,
+                    text=p.text,
+                    step_idx=step,
+                    objective_idx=p.objective_idx,
+                    is_supporting=is_supporting,
+                    source_title=p.title,
+                )
+                policy.on_append(
+                    ctx, pending, scorer=scorer, summarizer=summarizer, query=query
+                )
+                peak = max(peak, ctx.used())
+            return True
 
         for step in range(1, self.max_steps + 1):
-            prompt = ctx.render_prompt() + prompts.CONTINUE_CUE
-            out = self.backend.complete(prompt, stop=["</search>", "</answer>", "<information>"])
+            out = self.backend.complete(
+                ctx.render_prompt() + prompts.CONTINUE_CUE,
+                stop=["</search>", "</answer>", "<information>"],
+            )
             kind, payload = _parse_action(out)
+
+            # Think-only / truncated turn: one hard commit nudge that prefills
+            # <answer> so the model cannot open a new <think> block.
+            if kind is None and not commit_nudge_used:
+                commit_nudge_used = True
+                out = self.backend.complete(
+                    ctx.render_prompt() + prompts.COMMIT_CUE,
+                    stop=["</answer>", "</search>"],
+                    max_tokens=64,
+                    assistant_prefix="<answer>",
+                )
+                kind, payload = _parse_action(out)
+                # If it somehow still didn't answer, leave kind as None and fall
+                # through to forced answer after the loop.
+                if kind is None:
+                    # Prefill may have returned bare answer text without tags.
+                    bare = (out or "").replace("<answer>", "").replace("</answer>", "").strip()
+                    if bare and "<think>" not in bare and "<search>" not in bare:
+                        kind, payload = "answer", bare
 
             if kind == "answer":
                 prediction = payload
@@ -170,48 +255,15 @@ class ReActAgent:
                 break
 
             if kind == "search":
-                n_searches += 1
-                hits = retriever.search(payload, topk=self.topk, exclude_idx=retrieved_idx)
-                new_hits = [p for p in hits if p.idx not in retrieved_idx]
-                if not new_hits:
-                    n_stale += 1
-                    if n_stale >= 2:
-                        break  # nothing new to find; go answer
-                    continue
-                for p in new_hits:
-                    retrieved_idx.add(p.idx)
-                    # Under 'corpus' scope the passage is an unlabeled corpus doc;
-                    # its gold status is decided here by title match. Under 'pool'
-                    # scope the dataset label is authoritative (identical result,
-                    # since a supporting paragraph's title is a gold title).
-                    is_supporting = (
-                        (p.title in gold_titles) if label_by_title else p.is_supporting
-                    )
-                    if is_supporting:
-                        retrieved_gold_titles.add(p.title)
-                    pending = Block(
-                        id=ctx.next_id(),
-                        role=OBSERVATION,
-                        text=p.text,
-                        step_idx=step,
-                        objective_idx=p.objective_idx,
-                        is_supporting=is_supporting,
-                        source_title=p.title,
-                    )
-                    policy.on_append(
-                        ctx, pending, scorer=scorer, summarizer=summarizer, query=query
-                    )
-                    peak = max(peak, ctx.used())
+                if not apply_search(payload):
+                    break
                 continue
 
-            # No parseable action: nudge once more, then bail to a forced answer.
-            if step >= 2:
-                break
+            # Still no parseable action after the commit nudge (or nudge already used).
+            break
 
         if not answered:
-            prompt = ctx.render_prompt() + prompts.FORCE_ANSWER_CUE
-            out = self.backend.complete(prompt, stop=["</answer>"], max_tokens=256)
-            prediction = _clean_answer(out)
+            prediction = _force_answer(self.backend, ctx)
 
         u1 = self.backend.usage
         # Denominator is the gold-title count so it is meaningful under both scopes

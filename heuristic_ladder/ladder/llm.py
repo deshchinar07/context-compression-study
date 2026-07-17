@@ -67,12 +67,20 @@ class LLMBackend:
         stop: Optional[List[str]] = None,
         max_tokens: Optional[int] = None,
         system: Optional[str] = None,
+        assistant_prefix: Optional[str] = None,
     ) -> str:
-        """Single chat completion. Retries with exponential backoff on transient errors."""
+        """Single chat completion. Retries with exponential backoff on transient errors.
+
+        ``assistant_prefix`` (e.g. ``"<answer>"``) prefills the assistant turn so the
+        model continues from that text -- used to force an answer tag when the model
+        otherwise burns its budget inside ``<think>``.
+        """
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
+        if assistant_prefix:
+            messages.append({"role": "assistant", "content": assistant_prefix})
 
         last_err = None
         for attempt in range(self.max_retries):
@@ -85,6 +93,9 @@ class LLMBackend:
                     stop=stop,
                 )
                 text = resp.choices[0].message.content or ""
+                # Some servers echo the prefill; others return only the continuation.
+                if assistant_prefix and not text.startswith(assistant_prefix):
+                    text = assistant_prefix + text
                 if resp.usage:
                     self.usage.add(resp.usage.prompt_tokens, resp.usage.completion_tokens)
                 return text
