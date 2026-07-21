@@ -1,0 +1,249 @@
+#!/usr/bin/env python3
+"""Summarize and plot ladder F1 across the main experimental runs.
+
+Usage (from heuristic_ladder/):
+  python scripts/plot_ladder_results.py
+  python scripts/plot_ladder_results.py --out-dir results/figures
+
+Reads the JSONL files under results/ and prints a table + saves PNG charts.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from collections import defaultdict
+from pathlib import Path
+
+LADDER = ["H0", "H1", "H2", "H3", "Oracle"]
+METRIC = "mem1_table_summed_f1"
+
+
+def load_rows(path: Path) -> list[dict]:
+    rows = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or '"_meta"' in line[:20]:
+                continue
+            rows.append(json.loads(line))
+    return rows
+
+
+def mean_by_policy(
+    rows: list[dict],
+    *,
+    dataset: str | None = None,
+    n_objectives: int | None = None,
+    budget: int | None = None,
+    scope: str | None = None,
+) -> dict[str, float]:
+    buckets: dict[str, list[float]] = defaultdict(list)
+    for r in rows:
+        if dataset is not None and r.get("dataset") != dataset:
+            continue
+        if n_objectives is not None and int(r.get("n_objectives", 1)) != n_objectives:
+            continue
+        if budget is not None and int(r["budget"]) != budget:
+            continue
+        sc = r.get("retrieval_scope", "pool")
+        if scope is not None and sc != scope:
+            continue
+        pol = r["policy"]
+        if pol not in LADDER:
+            continue
+        buckets[pol].append(float(r[METRIC]))
+    return {p: (sum(buckets[p]) / len(buckets[p]) if buckets[p] else float("nan")) for p in LADDER}
+
+
+def mean_recall(rows, **filt) -> float:
+    vals = []
+    for r in rows:
+        if filt.get("dataset") and r.get("dataset") != filt["dataset"]:
+            continue
+        if filt.get("n_objectives") is not None and int(r.get("n_objectives", 1)) != filt["n_objectives"]:
+            continue
+        if filt.get("budget") is not None and int(r["budget"]) != filt["budget"]:
+            continue
+        if filt.get("scope") and r.get("retrieval_scope", "pool") != filt["scope"]:
+            continue
+        tot = r.get("gold_titles_total") or 0
+        got = r.get("gold_titles_retrieved") or 0
+        vals.append(got / tot if tot else 1.0)
+    return sum(vals) / len(vals) if vals else float("nan")
+
+
+def n_examples(rows, **filt) -> int:
+    ids = set()
+    for r in rows:
+        if filt.get("dataset") and r.get("dataset") != filt["dataset"]:
+            continue
+        if filt.get("n_objectives") is not None and int(r.get("n_objectives", 1)) != filt["n_objectives"]:
+            continue
+        if filt.get("budget") is not None and int(r["budget"]) != filt["budget"]:
+            continue
+        if filt.get("scope") and r.get("retrieval_scope", "pool") != filt["scope"]:
+            continue
+        ids.add(r["example_id"])
+    return len(ids)
+
+
+def build_runs(results_dir: Path) -> list[dict]:
+    """Named experiment slices to compare."""
+    pool200 = load_rows(results_dir / "pool_hotpot_n200.jsonl")
+    multi_hp = load_rows(results_dir / "pool_multiobj_n100.jsonl")
+    multi_2w = load_rows(results_dir / "pool_multiobj_2wiki.jsonl")
+    union = load_rows(results_dir / "union_hotpot_n100.jsonl")
+
+    specs = [
+        ("Pool Hotpot N=1 B=512", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=512, scope="pool")),
+        ("Pool Hotpot N=1 B=256", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=256, scope="pool")),
+        ("Pool Hotpot N=2 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=2, budget=512, scope="pool")),
+        ("Pool Hotpot N=8 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=8, budget=512, scope="pool")),
+        ("Pool 2Wiki N=2 B=512", multi_2w, dict(dataset="2wiki", n_objectives=2, budget=512, scope="pool")),
+        ("Pool 2Wiki N=8 B=512", multi_2w, dict(dataset="2wiki", n_objectives=8, budget=512, scope="pool")),
+        ("Union Hotpot N=1 B=512", union, dict(dataset="hotpotqa", n_objectives=1, budget=512, scope="corpus")),
+        ("Union Hotpot N=1 B=1024", union, dict(dataset="hotpotqa", n_objectives=1, budget=1024, scope="corpus")),
+    ]
+
+    runs = []
+    for name, rows, filt in specs:
+        means = mean_by_policy(rows, **filt)
+        if all(v != v for v in means.values()):  # all NaN
+            continue
+        runs.append(
+            {
+                "name": name,
+                "n": n_examples(rows, **filt),
+                "recall": mean_recall(rows, **filt),
+                "f1": means,
+                "gaps": {
+                    "timing": means["H1"] - means["H0"],
+                    "selection": means["H2"] - means["H1"],
+                    "selection++": means["H3"] - means["H2"],
+                    "headroom": means["Oracle"] - means["H3"],
+                },
+            }
+        )
+    return runs
+
+
+def print_table(runs: list[dict]) -> None:
+    header = f"{'run':28} {'n':>4}  " + " ".join(f"{p:>7}" for p in LADDER) + "  recall"
+    print(header)
+    print("-" * len(header))
+    for run in runs:
+        f1 = run["f1"]
+        cells = " ".join(f"{f1[p]:7.3f}" for p in LADDER)
+        print(f"{run['name']:28} {run['n']:4d}  {cells}  {run['recall']:6.2f}")
+    print()
+    print("Gaps (H0→H1 timing, H1→H2 selection, H2→H3 ++, H3→Oracle headroom)")
+    print(f"{'run':28}  {'tim':>7} {'sel':>7} {'sel++':>7} {'head':>7}")
+    for run in runs:
+        g = run["gaps"]
+        print(
+            f"{run['name']:28}  {g['timing']:+7.3f} {g['selection']:+7.3f} "
+            f"{g['selection++']:+7.3f} {g['headroom']:+7.3f}"
+        )
+
+
+def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+
+    # 1) Grouped bars: each run as a group of 5 rungs
+    fig, ax = plt.subplots(figsize=(12, 5))
+    x = range(len(runs))
+    width = 0.15
+    for i, pol in enumerate(LADDER):
+        xs = [xi + (i - 2) * width for xi in x]
+        ys = [run["f1"][pol] for run in runs]
+        ax.bar(xs, ys, width, label=pol)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels([r["name"].replace(" ", "\n") for r in runs], fontsize=8)
+    ax.set_ylabel(f"{METRIC} (mean)")
+    ax.set_title("Heuristic ladder F1 across runs")
+    ax.legend(ncols=5, fontsize=8, loc="upper left")
+    ax.set_ylim(0, max(max(r["f1"].values()) for r in runs) * 1.15)
+    fig.tight_layout()
+    p1 = out_dir / "ladder_f1_by_run.png"
+    fig.savefig(p1, dpi=150)
+    plt.close(fig)
+    paths.append(p1)
+
+    # 2) Line chart: rungs on x-axis, one line per run (binding-budget subset)
+    focus = [r for r in runs if "B=512" in r["name"]]
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for run in focus:
+        ax.plot(LADDER, [run["f1"][p] for p in LADDER], marker="o", label=run["name"])
+    ax.set_xlabel("Ladder rung")
+    ax.set_ylabel(f"{METRIC} (mean)")
+    ax.set_title("Ladder curves @ budget=512")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    p2 = out_dir / "ladder_curves_b512.png"
+    fig.savefig(p2, dpi=150)
+    plt.close(fig)
+    paths.append(p2)
+
+    # 3) Gap stacked / grouped for B=512 runs
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    gap_keys = ["timing", "selection", "selection++", "headroom"]
+    x = range(len(focus))
+    width = 0.2
+    for i, gk in enumerate(gap_keys):
+        xs = [xi + (i - 1.5) * width for xi in x]
+        ys = [run["gaps"][gk] for run in focus]
+        ax.bar(xs, ys, width, label=gk)
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels([r["name"].replace(" ", "\n") for r in focus], fontsize=8)
+    ax.set_ylabel("Δ F1")
+    ax.set_title("Decomposition gaps @ budget=512")
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    p3 = out_dir / "ladder_gaps_b512.png"
+    fig.savefig(p3, dpi=150)
+    plt.close(fig)
+    paths.append(p3)
+
+    return paths
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--results-dir",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "results",
+    )
+    ap.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "results" / "figures",
+    )
+    ap.add_argument("--no-plot", action="store_true")
+    args = ap.parse_args()
+
+    runs = build_runs(args.results_dir)
+    if not runs:
+        raise SystemExit(f"no runs found under {args.results_dir}")
+
+    print(f"Metric: {METRIC}\n")
+    print_table(runs)
+
+    if not args.no_plot:
+        paths = plot_runs(runs, args.out_dir)
+        print("\nWrote:")
+        for p in paths:
+            print(f"  {p}")
+
+
+if __name__ == "__main__":
+    main()
