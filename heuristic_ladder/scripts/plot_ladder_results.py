@@ -128,6 +128,86 @@ def build_runs(results_dir: Path) -> list[dict]:
     return runs
 
 
+def build_e5_comparison(results_dir: Path) -> list[dict]:
+    """bm25 vs e5 on matched slices. For N=1, filter bm25 n=200 to the e5 n=100
+    example_ids so the comparison is apples-to-apples (both seed=0)."""
+    bm200 = load_rows(results_dir / "pool_hotpot_n200.jsonl")
+    bm_mhp = load_rows(results_dir / "pool_multiobj_n100.jsonl")
+    bm_m2w = load_rows(results_dir / "pool_multiobj_2wiki.jsonl")
+    e5_hp1 = load_rows(results_dir / "pool_hotpot_n100_e5.jsonl")
+    e5_mhp = load_rows(results_dir / "pool_multiobj_n100_e5.jsonl")
+    e5_m2w = load_rows(results_dir / "pool_multiobj_2wiki_e5.jsonl")
+
+    keep = {r["example_id"] for r in e5_hp1}
+    bm200_match = [r for r in bm200 if r["example_id"] in keep]
+
+    out = []
+    for name, bm_rows, e5_rows, filt in [
+        ("Pool Hotpot N=1", bm200_match, e5_hp1,
+         dict(dataset="hotpotqa", n_objectives=1, budget=512, scope="pool")),
+        ("Pool Hotpot N=2", bm_mhp, e5_mhp,
+         dict(dataset="hotpotqa", n_objectives=2, budget=512, scope="pool")),
+        ("Pool 2Wiki N=2", bm_m2w, e5_m2w,
+         dict(dataset="2wiki", n_objectives=2, budget=512, scope="pool")),
+    ]:
+        bm = mean_by_policy(bm_rows, **filt)
+        e5 = mean_by_policy(e5_rows, **filt)
+        out.append({"name": name, "bm25": bm, "e5": e5})
+    return out
+
+
+def plot_e5_comparison(comp: list[dict], out_dir: Path) -> list[Path]:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+
+    # 1) F1 by rung: bm25 vs e5, grouped per slice
+    fig, ax = plt.subplots(figsize=(10, 5))
+    x = range(len(comp))
+    width = 0.35
+    for i, pol in enumerate(LADDER):
+        xs_bm = [xi + (i - 2.5) * width / 2.5 for xi in x]
+        xs_e5 = [xi + (i - 2.5) * width / 2.5 + width for xi in x]
+        ax.bar(xs_bm, [c["bm25"][pol] for c in comp], width / 2.5, label=f"{pol} bm25", alpha=0.55)
+        ax.bar(xs_e5, [c["e5"][pol] for c in comp], width / 2.5, label=f"{pol} e5")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels([c["name"] for c in comp], fontsize=9)
+    ax.set_ylabel(f"{METRIC} (mean)")
+    ax.set_title("e5 vs bm25 — F1 by rung (B=512)")
+    ax.legend(ncols=5, fontsize=6, loc="upper left")
+    fig.tight_layout()
+    p1 = out_dir / "e5_vs_bm25_f1.png"
+    fig.savefig(p1, dpi=150)
+    plt.close(fig)
+    paths.append(p1)
+
+    # 2) Selection gap (H2-H1) bm25 vs e5 — the key cross-backend number
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    x = range(len(comp))
+    width = 0.35
+    bm_sel = [c["bm25"]["H2"] - c["bm25"]["H1"] for c in comp]
+    e5_sel = [c["e5"]["H2"] - c["e5"]["H1"] for c in comp]
+    ax.bar([xi - width / 2 for xi in x], bm_sel, width, label="bm25 selection (H2−H1)")
+    ax.bar([xi + width / 2 for xi in x], e5_sel, width, label="e5 selection (H2−H1)")
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels([c["name"] for c in comp], fontsize=9)
+    ax.set_ylabel("Δ F1 (selection gap)")
+    ax.set_title("Does semantic selection rescue the selection arrow? (B=512)")
+    ax.legend()
+    fig.tight_layout()
+    p2 = out_dir / "e5_vs_bm25_selection_gap.png"
+    fig.savefig(p2, dpi=150)
+    plt.close(fig)
+    paths.append(p2)
+
+    return paths
+
+
 def print_table(runs: list[dict]) -> None:
     header = f"{'run':28} {'n':>4}  " + " ".join(f"{p:>7}" for p in LADDER) + "  recall"
     print(header)
@@ -240,6 +320,13 @@ def main() -> None:
 
     if not args.no_plot:
         paths = plot_runs(runs, args.out_dir)
+        # e5 vs bm25 sensitivity (only if e5 files are present)
+        try:
+            comp = build_e5_comparison(args.results_dir)
+        except FileNotFoundError:
+            comp = []
+        if comp:
+            paths += plot_e5_comparison(comp, args.out_dir)
         print("\nWrote:")
         for p in paths:
             print(f"  {p}")
