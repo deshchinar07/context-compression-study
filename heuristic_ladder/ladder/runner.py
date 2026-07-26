@@ -19,8 +19,8 @@ from . import tokenizer
 from .agent import ReActAgent
 from .data import Example, load_examples
 from .llm import LLMBackend
-from .metrics import score_prediction
 from .policies import build_policy
+from .report import score_prediction
 
 
 def _get_corpus(
@@ -159,93 +159,4 @@ def run_grid(
                                 )
     if verbose:
         print(f"\nWrote {n_written} rows to {out_path}")
-    return out_path
-
-
-def run_baseline_grid(
-    baseline,
-    datasets: Sequence[str],
-    splits: Sequence[str],
-    n_objectives_list: Sequence[int],
-    out_path: str,
-    limit: Optional[int] = None,
-    seed: int = 0,
-    corpus_source: str = "union",
-    corpus_index_dir: Optional[str] = None,
-    cache_dir: str = "data",
-    verbose: bool = True,
-) -> str:
-    """Run a learned baseline (e.g. MEM1Baseline) over the same example grid.
-
-    Emits rows in the *same* schema as ``run_grid`` -- including both scoring
-    protocols and the ``retrieval``/policy fields -- so ``aggregate`` can place the
-    baseline next to the ladder as a MEASURED (in-harness, no-caveat) result. There
-    is no budget loop: memory-consolidating baselines have no external token budget,
-    so ``budget`` is recorded as -1.
-
-    If the baseline requests ``retrieval_scope='corpus'``, the shared corpus is
-    built once per (dataset, split) here and handed to the baseline -- exactly as
-    ``run_grid`` does -- so the baseline and the ladder face the identical index.
-    """
-    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    scope = (getattr(baseline, "retrieval_scope", "pool") or "pool").lower()
-    meta = {
-        "baseline": getattr(baseline, "name", type(baseline).__name__),
-        "backbone": baseline.backend.model,
-        "base_url": baseline.backend.base_url,
-        "retrieval": getattr(baseline, "retrieval", "?"),
-        "retrieval_scope": scope,
-        "corpus_source": corpus_source if scope == "corpus" else None,
-        "tokenizer": tokenizer.backend_name(),
-        "measured_in_harness": True,
-        "seed": seed,
-    }
-    corpus_cache: dict = {}
-    n_written = 0
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(json.dumps({"_meta": meta}) + "\n")
-        for dataset in datasets:
-            for split in splits:
-                if scope == "corpus":
-                    baseline.corpus_index = _get_corpus(
-                        corpus_cache, corpus_source, dataset, split,
-                        getattr(baseline, "retrieval", "bm25"),
-                        corpus_index_dir, seed, cache_dir, verbose,
-                    )
-                for n_obj in n_objectives_list:
-                    examples = load_examples(
-                        dataset, split=split, n_objectives=n_obj,
-                        limit=limit, seed=seed, cache_dir=cache_dir,
-                    )
-                    for ex in examples:
-                        t0 = time.time()
-                        res = baseline.run(ex)
-                        score = score_prediction(res.prediction, ex.answers)
-                        row = asdict(res)
-                        row.update(
-                            {
-                                "split": split,
-                                "mem1_table_summed_em": score.mem1_table.summed_em,
-                                "mem1_table_summed_f1": score.mem1_table.summed_f1,
-                                "mem1_table_mean_em": score.mem1_table.mean_em,
-                                "mem1_table_mean_f1": score.mem1_table.mean_f1,
-                                "standard_qa_summed_em": score.standard_qa.summed_em,
-                                "standard_qa_summed_f1": score.standard_qa.summed_f1,
-                                "standard_qa_mean_em": score.standard_qa.mean_em,
-                                "standard_qa_mean_f1": score.standard_qa.mean_f1,
-                                "uses_gold": False,
-                                "wall_time_s": round(time.time() - t0, 2),
-                            }
-                        )
-                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-                        f.flush()
-                        n_written += 1
-                    if verbose:
-                        print(
-                            f"[{dataset}/{split} N={n_obj}] baseline "
-                            f"{meta['baseline']} done (rows: {n_written})",
-                            flush=True,
-                        )
-    if verbose:
-        print(f"\nWrote {n_written} baseline rows to {out_path}")
     return out_path

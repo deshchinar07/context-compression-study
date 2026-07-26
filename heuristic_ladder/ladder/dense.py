@@ -1,15 +1,15 @@
 """Dense (e5) retrieval + relevance scoring, behind the BM25/lexical interfaces.
 
-This exists purely to align our retrieval *algorithm* with Search-R1 / MEM1, whose
-default retriever is ``intfloat/e5-base-v2`` over a FAISS index. Selecting ``e5``
-here swaps the ranking function for a dense one while leaving everything else in
-the harness identical, so an e5-vs-e5 comparison against those papers isolates the
-same policy question a BM25-vs-BM25 comparison does -- just at their operating
-point instead of a sparse one.
+This exists to align our retrieval *algorithm* with Search-R1, whose default
+retriever is ``intfloat/e5-base-v2`` over a FAISS index. Selecting ``e5`` here swaps
+the ranking function for a dense one while leaving everything else in the harness
+identical, so an e5-vs-e5 comparison against that setup isolates the same policy
+question a BM25-vs-BM25 comparison does -- just at their operating point instead of
+a sparse one.
 
 Two classes, each a drop-in for its sparse sibling:
-  * ``E5Retriever``  <-> ``retriever.BM25Retriever``   (``.search(query, topk, exclude_idx)``)
-  * ``E5Scorer``     <-> ``scoring.LexicalScorer``      (``.score(text)``)
+  * ``E5Retriever``  <-> ``retrieval.BM25Retriever``   (``.search(query, topk, exclude_idx)``)
+  * ``E5Scorer``     <-> ``retrieval.LexicalScorer``  (``.score(text)``)
 
 e5 requires asymmetric prefixes -- queries are embedded as ``"query: ..."`` and
 passages as ``"passage: ..."`` -- which we honor so the numbers match the paper's

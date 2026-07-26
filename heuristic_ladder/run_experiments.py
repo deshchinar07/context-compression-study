@@ -18,11 +18,11 @@ THE THREE RETRIEVAL TIERS (the main axis you will change)
       Local, no GPU. Use as the realistic robustness tier on your laptop.
   RETRIEVAL_SCOPE="corpus", CORPUS_SOURCE="kilt", CORPUS_INDEX_DIR=<path>
       -> the full Wikipedia FAISS/e5 index (the "20GB" open-domain tier, matches
-      MEM1's setup). Needs a prebuilt index + a GPU/large-RAM box. Use for the
+      Search-R1's setup). Needs a prebuilt index + a GPU/large-RAM box. Use for the
       final open-domain comparison. Build the index off-box (see ladder/kilt.py).
 
-Keep RETRIEVAL / RETRIEVAL_SCOPE / CORPUS_SOURCE IDENTICAL between a ladder run
-and any baseline run you compare it to, or the comparison is confounded.
+Keep RETRIEVAL / RETRIEVAL_SCOPE / CORPUS_SOURCE IDENTICAL between runs you
+compare, or the comparison is confounded.
 
 --------------------------------------------------------------------------------
 EQUIVALENT CLI COMMANDS (what each is for)
@@ -52,19 +52,10 @@ python -m ladder run --datasets hotpotqa --retrieval-scope corpus --corpus-sourc
   --budgets 4000 --policies H0,H1,H2,H3,Oracle --limit 200 \
   --out results/kilt_run.jsonl
 
-# 5) MEM1 baseline in-harness -- MUST match the ladder run's scope to be fair.
-#    Requires serving the MEM1 checkpoint (vLLM) on --base-url; see ladder/baselines/mem1.py.
-python -m ladder run-baseline --baseline mem1 --datasets hotpotqa --n-objectives 16 \
-  --retrieval-scope corpus --corpus-source union \
-  --base-url http://localhost:8000/v1 --limit 200 \
-  --out results/mem1_union.jsonl
-
-# 6) Aggregate -- decomposition table, % of Oracle, gaps, recall column.
-#    Pass several comma-separated files to overlay a measured baseline inline.
+# 5) Aggregate -- decomposition table, % of Oracle, gaps, recall column.
+#    Pass several comma-separated files to combine runs in one report.
 python -m ladder aggregate --results results/pool_multiobj.jsonl
-python -m ladder aggregate --results results/union_run.jsonl,results/mem1_union.jsonl
-python -m ladder aggregate --results results/pool_multiobj.jsonl \
-  --baselines configs/published_baselines.json
+python -m ladder aggregate --results results/union_run.jsonl,results/kilt_run.jsonl
 
 # Local serving on macOS (no CUDA): serve Qwen via MLX/Ollama/LM Studio and set
 #   BASE_URL below to that endpoint (e.g. http://localhost:8000/v1). vLLM is
@@ -78,13 +69,13 @@ from __future__ import annotations
 # CONFIG  ---  edit this block, then run `python run_experiments.py`
 # ============================================================================
 
-# Which action to run: "prepare-data" | "run" | "run-baseline" | "aggregate".
+# Which action to run: "prepare-data" | "run" | "aggregate".
 MODE = "run"
 
 # --- Data -------------------------------------------------------------------
 DATASETS = ["hotpotqa"]          # subset of: hotpotqa, 2wiki, musique
 SPLITS = ["test"]                # test = validation split; dev = slice of train
-N_OBJECTIVES = [1]               # MEM1-style multi-objective packing (e.g. [2,8,16,32])
+N_OBJECTIVES = [1]               # multi-objective packing (e.g. [2,8,16,32])
 LIMIT = 20                       # cap on #tasks (None = all). Counts TASKS, not sub-questions.
 SEED = 0
 CACHE_DIR = "data"               # local JSONL cache (download once, reuse forever)
@@ -113,17 +104,9 @@ API_KEY_ENV = "DEEPINFRA_API_KEY"                  # env var holding the key (.e
 TEMPERATURE = 0.0                # 0 = deterministic (the fairness premise)
 MAX_TOKENS = 512
 
-# --- Baseline run knobs (MODE="run-baseline") -------------------------------
-BASELINE = "mem1"
-BASELINE_MODEL = None            # None -> the baseline's own checkpoint (e.g. MEM1 release)
-BASELINE_BASE_URL = "http://localhost:8000/v1"     # where the checkpoint is served (vLLM)
-MAX_ITERATIONS = 6               # MEM1 constant-memory loop length
-BASELINE_OUT = "results/mem1_baseline.jsonl"
-
 # --- Aggregate knobs (MODE="aggregate") -------------------------------------
-AGG_RESULTS = "results/pool_pilot.jsonl"   # one path, or comma-separated to overlay
-AGG_METRIC = "both"              # "both" | a specific key (see ladder/aggregate.py)
-AGG_BASELINES = None             # e.g. "configs/published_baselines.json" for the overlay
+AGG_RESULTS = "results/pool_pilot.jsonl"   # one path, or comma-separated to combine
+AGG_METRIC = "both"              # "both" | a specific key (see ladder/report.py)
 
 # ============================================================================
 # END CONFIG  ---  logic below; you normally do not need to edit past here.
@@ -181,40 +164,14 @@ def main():
         )
         return
 
-    if MODE == "run-baseline":
-        from ladder.runner import run_baseline_grid
-
-        if BASELINE == "mem1":
-            from ladder.baselines.mem1 import MEM1Baseline, MEM1_CHECKPOINT
-
-            backend = _backend(
-                BASELINE_MODEL or MEM1_CHECKPOINT, BASELINE_BASE_URL,
-                API_KEY_ENV, TEMPERATURE,
-            )
-            baseline = MEM1Baseline(
-                backend=backend, retrieval=RETRIEVAL, topk=TOPK,
-                max_iterations=MAX_ITERATIONS, retrieval_scope=RETRIEVAL_SCOPE,
-            )
-        else:
-            raise SystemExit(f"unknown BASELINE {BASELINE!r}")
-
-        run_baseline_grid(
-            baseline, datasets=DATASETS, splits=SPLITS,
-            n_objectives_list=N_OBJECTIVES, out_path=BASELINE_OUT,
-            limit=LIMIT, seed=SEED,
-            corpus_source=CORPUS_SOURCE, corpus_index_dir=CORPUS_INDEX_DIR,
-            cache_dir=CACHE_DIR,
-        )
-        return
-
     if MODE == "aggregate":
-        from ladder.aggregate import report
+        from ladder.report import report
 
-        print(report(AGG_RESULTS, metric=AGG_METRIC, baselines_path=AGG_BASELINES))
+        print(report(AGG_RESULTS, metric=AGG_METRIC))
         return
 
     raise SystemExit(
-        f"unknown MODE {MODE!r}; choose 'prepare-data', 'run', 'run-baseline', 'aggregate'."
+        f"unknown MODE {MODE!r}; choose 'prepare-data', 'run', 'aggregate'."
     )
 
 

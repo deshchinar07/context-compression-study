@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from ladder.metrics import (  # noqa: E402
+from ladder.report import (  # noqa: E402
     mem1_em,
     mem1_f1,
     mem1_normalize,

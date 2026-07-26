@@ -100,58 +100,15 @@ def cmd_run(args):
     )
 
 
-def cmd_run_baseline(args):
-    _load_dotenv()
-    from .llm import LLMBackend
-    from .runner import run_baseline_grid
-
-    if args.baseline == "mem1":
-        from .baselines.mem1 import MEM1Baseline, MEM1_CHECKPOINT
-
-        model = args.model or MEM1_CHECKPOINT
-        backend = LLMBackend(
-            model=model,
-            base_url=args.base_url,
-            api_key_env=args.api_key_env,
-            temperature=args.temperature,
-        )
-        baseline = MEM1Baseline(
-            backend=backend,
-            retrieval=args.retrieval,
-            topk=args.topk,
-            max_iterations=args.max_iterations,
-            retrieval_scope=args.retrieval_scope,
-        )
-    else:
-        raise SystemExit(f"unknown baseline {args.baseline!r}")
-
-    run_baseline_grid(
-        baseline,
-        datasets=_csv(args.datasets),
-        splits=_csv(args.splits),
-        n_objectives_list=_ints(args.n_objectives),
-        out_path=args.out,
-        limit=args.limit,
-        seed=args.seed,
-        corpus_source=args.corpus_source,
-        corpus_index_dir=args.corpus_index_dir,
-        cache_dir=args.cache_dir,
-    )
-
-
 def cmd_aggregate(args):
-    from .aggregate import report
+    from .report import report
 
-    if args.baselines and not os.path.exists(args.baselines):
-        raise SystemExit(f"--baselines {args.baselines!r} not found")
-    print(report(args.results, metric=args.metric, baselines_path=args.baselines))
+    print(report(args.results, metric=args.metric))
 
 
 def build_parser():
     p = argparse.ArgumentParser(prog="ladder", description="Heuristic-ladder harness")
     sub = p.add_subparsers(dest="cmd", required=True)
-
-    common_data = dict()
 
     pd = sub.add_parser("prepare-data", help="download + cache datasets as local JSONL")
     pd.add_argument("--datasets", default="hotpotqa,2wiki,musique")
@@ -187,8 +144,7 @@ def build_parser():
         help=(
             "Ranking backend shared by retrieval and the selection scorer. 'bm25' "
             "(default) is sparse and dependency-free; 'e5' is the intfloat/e5-base-v2 "
-            "dense retriever Search-R1/MEM1 use (needs sentence-transformers). Pick "
-            "the one that matches the baseline you are comparing against."
+            "dense retriever Search-R1 uses (needs sentence-transformers)."
         ),
     )
     pr.add_argument(
@@ -227,67 +183,9 @@ def build_parser():
     )
     pr.set_defaults(func=cmd_run)
 
-    rb = sub.add_parser(
-        "run-baseline",
-        help="run a learned baseline (e.g. MEM1) in-harness against our retriever",
-    )
-    rb.add_argument("--baseline", default="mem1", choices=["mem1"])
-    rb.add_argument("--datasets", default="hotpotqa")
-    rb.add_argument("--splits", default="test")
-    rb.add_argument("--n-objectives", dest="n_objectives", default="2")
-    rb.add_argument("--limit", type=int, default=20)
-    rb.add_argument("--seed", type=int, default=0)
-    rb.add_argument("--out", default="results/mem1_baseline.jsonl")
-    rb.add_argument("--cache-dir", default="data")
-    rb.add_argument(
-        "--model",
-        default=None,
-        help="served checkpoint id; defaults to the baseline's own (e.g. MEM1's release).",
-    )
-    rb.add_argument(
-        "--base-url",
-        default="http://localhost:8000/v1",
-        help="OpenAI-compatible endpoint that serves /v1/completions (e.g. local vLLM).",
-    )
-    rb.add_argument("--api-key-env", default="DEEPINFRA_API_KEY")
-    rb.add_argument("--temperature", type=float, default=0.0)
-    rb.add_argument("--topk", type=int, default=3)
-    rb.add_argument("--max-iterations", type=int, default=6)
-    rb.add_argument(
-        "--retrieval",
-        default="bm25",
-        choices=["bm25", "e5"],
-        help="Must match the retrieval used for the ladder run you compare against.",
-    )
-    rb.add_argument(
-        "--retrieval-scope",
-        dest="retrieval_scope",
-        default="pool",
-        choices=["pool", "corpus"],
-        help=(
-            "Must match the ladder run you compare against. 'corpus' puts the "
-            "baseline on the same shared index as the ladder (fair comparison); "
-            "'pool' (default) uses each example's bundled pool."
-        ),
-    )
-    rb.add_argument(
-        "--corpus-source",
-        dest="corpus_source",
-        default="union",
-        choices=["union", "kilt"],
-        help="Only used with --retrieval-scope corpus (see `run`).",
-    )
-    rb.add_argument(
-        "--corpus-index-dir",
-        dest="corpus_index_dir",
-        default=None,
-        help="Only used with --corpus-source kilt: path to the prebuilt FAISS index dir.",
-    )
-    rb.set_defaults(func=cmd_run_baseline)
-
     ag = sub.add_parser("aggregate", help="summarize a results file")
     ag.add_argument("--results", required=True,
-                    help="one path, or comma-separated (e.g. ladder.jsonl,mem1.jsonl)")
+                    help="one path, or comma-separated (e.g. run1.jsonl,run2.jsonl)")
     ag.add_argument(
         "--metric",
         default="both",
@@ -306,17 +204,6 @@ def build_parser():
             "Default 'both' reports headline mem1_table_summed_f1 first (the key "
             "directly comparable to MEM1's reported F1) and diagnostic "
             "standard_qa_mean_f1 second. standard_qa_* is diagnostic only."
-        ),
-    )
-    ag.add_argument(
-        "--baselines",
-        default=None,
-        help=(
-            "Optional path to a published-baselines JSON (e.g. "
-            "configs/published_baselines.json). When given, matching learned/RL "
-            "numbers are overlaid per group and the retrieval-scope / backbone "
-            "caveats are printed automatically. Unverified (null-score) entries "
-            "print as TODO, never as numbers."
         ),
     )
     ag.set_defaults(func=cmd_aggregate)

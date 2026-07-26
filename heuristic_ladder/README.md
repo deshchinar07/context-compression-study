@@ -14,9 +14,11 @@ H3  -> Oracle : how much headroom is left to perfect selection?    (CEILING)
 
 Learned methods (MEM1, BACM-RL, ...) are **not** a rung — they never decomposed
 timing vs. selection, so where they land relative to H3 and Oracle is the
-*finding*, overlaid at aggregation time from their **published** numbers (this
-harness never runs their code). That overlay is comparative by construction, so
-it is caveated by construction — see *Comparing to published baselines* below.
+*finding*. This harness does not run their code; comparing against their
+published numbers is a separate, confounded step (different retrieval corpus
+and often a different/RL-trained backbone) and is left to future work. The
+internal rung-to-rung gaps here need no such caveat — they share one retriever,
+backbone, and prompt.
 
 ## Why you can trust the numbers (fairness invariants)
 
@@ -35,12 +37,12 @@ These are enforced in code, not just intended:
 - **Token-accurate budgets with the backbone's own tokenizer.** Budgets are in
   real Qwen tokens; the same counter is used for all rungs. (`ladder/tokenizer.py`)
 - **Two scoring protocols are reported and never conflated.** `mem1_table` is
-  the primary/headline protocol for comparisons against MEM1: MEM1
-  preprocessing, set-based token F1, strict semicolon splitting, and zero for
-  the whole example when the answer count is wrong. `standard_qa` is the
-  secondary SQuAD/HotpotQA diagnostic: Counter-based token F1 with forgiving
-  pad/truncate behavior, which separates reasoning quality from formatting
-  failures. (`ladder/metrics.py`)
+  the primary/headline protocol — named after MEM1's `eval.py`, which it matches
+  exactly: MEM1 preprocessing, set-based token F1, strict semicolon splitting,
+  and zero for the whole example when the answer count is wrong. `standard_qa`
+  is the secondary SQuAD/HotpotQA diagnostic: Counter-based token F1 with
+  forgiving pad/truncate behavior, which separates reasoning quality from
+  formatting failures. (`ladder/report.py`)
 - **No per-dataset tuning.** The single dev-set knob is H3's summary length.
   Pre-register the grid in `configs/preregistration.yaml` before looking at test.
 
@@ -172,12 +174,11 @@ then meaned over examples — because that is what MEM1's own `eval.py`
 tables. `mem1_table_mean_f1` divides by `n_objectives` (handy for reading a
 per-question rate) and is **not** what MEM1 prints.
 
-## Comparing to published baselines (the overlay)
+## Comparison to learned methods
 
 The plan's headline hypothesis — *do training-free heuristics recover most of
-what RL-trained folding buys?* — is inherently a comparison against **other
-papers' numbers** (MEM1, BACM-RL/FoldAct, PEEK). Two facts make that comparison
-delicate, and the overlay is built to keep you honest about both:
+what RL-trained folding buys?* — is ultimately a comparison against learned
+methods (MEM1, BACM-RL/FoldAct, PEEK). Two facts keep that comparison honest:
 
 1. **Internal rung-to-rung gaps need no caveat.** `H0→H1→H2→H3→Oracle` all share
    one retriever, backbone, and prompt, so their *relative* differences are
@@ -186,69 +187,27 @@ delicate, and the overlay is built to keep you honest about both:
    came from full-corpus retrieval (whole-Wikipedia dense index) and often a
    different/RL-trained backbone; ours come from a small bundled gold+distractor
    pool on a frozen Qwen2.5-7B-Instruct. A raw win/loss is therefore *not* yet
-   evidence about policy quality. The clean fix (README's no-caveat tier) is to
-   re-run the learned checkpoint **inside this harness** against our retriever so
-   the confound is applied equally to both sides.
+   evidence about policy quality.
 
-`configs/published_baselines.json` holds the transcribed numbers under a strict
-provenance schema: every entry names a source (`arxiv`, `table`, `page`), the
-exact metric key it is comparable to, its backbone, and its retrieval corpus.
-**Scores start `null`** — you transcribe them from the cited table; nothing is
-typed from memory, so no un-sourced number can silently enter a figure. Pass the
-file to `aggregate` to overlay matching baselines per group and auto-print the
-retrieval-scope / backbone caveats:
-
-```bash
-python -m ladder aggregate --results results/multiobj.jsonl \
-  --baselines configs/published_baselines.json
-```
-
-Entries still `null` render as `score=TODO (transcribe from <arxiv> <table>)`;
-verified entries render their number. Baselines are pinned to their comparable
-metric, so a MEM1 number never prints under the `standard_qa` diagnostic.
-
-### The no-caveat tier: run the learned baseline in-harness
-
-The clean way to *remove* (not just disclose) the retrieval/backbone confound is
-to run the learned checkpoint inside this harness against our own retriever.
-`ladder/baselines/mem1.py` does exactly that for MEM1: it reproduces MEM1's
-constant-memory inference loop and task prompt verbatim, swapping only the search
-tool to call our per-example retriever.
-
-```bash
-# 1) serve the released MEM1 checkpoint with a /v1/completions endpoint (vLLM):
-vllm serve Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release --port 8000
-
-# 2) run it in-harness over the same examples (match --retrieval to your ladder run):
-python -m ladder run-baseline --baseline mem1 \
-  --datasets hotpotqa --splits test --n-objectives 16 \
-  --base-url http://localhost:8000/v1 --retrieval bm25 \
-  --limit 200 --out results/mem1_inharness.jsonl
-
-# 3) aggregate ladder + measured baseline together (comma-separated):
-python -m ladder aggregate \
-  --results results/multiobj.jsonl,results/mem1_inharness.jsonl \
-  --baselines configs/published_baselines.json
-```
-
-The measured MEM1 row prints inline as `measured (in-harness, no caveat)` with its
-% of the Oracle ceiling — a legitimate apples-to-apples comparison, because both
-sides now face the identical retriever. MEM1 has no token budget (its memory is
-structurally constant), so it is shown once per task against every budget group.
+The clean fix — re-run the learned checkpoint **inside this harness** against
+our retriever so the confound applies equally to both sides — is future work and
+is not wired into this version of the harness. Until then, treat the rung
+decomposition as the contribution and any cross-paper number as a caveated,
+separately-sourced overlay.
 
 ### Retrieval backend (`--retrieval bm25|e5`)
 
-Both `run` and `run-baseline` take `--retrieval`. `bm25` (default) is sparse and
+`--retrieval` selects the ranking backend. `bm25` (default) is sparse and
 dependency-free. `e5` uses `intfloat/e5-base-v2` — the dense retriever Search-R1
-and MEM1 use by default — for the retriever *and* the H2/H3 selection scorer, so
-you can align the ranking algorithm with those papers (`pip install
-sentence-transformers`). Whatever you pick, keep it identical between a ladder run
-and the in-harness baseline you compare it to.
+uses by default — for the retriever *and* the H2/H3 selection scorer, so you can
+align the ranking algorithm with that setup (`pip install
+sentence-transformers`). Whatever you pick, keep it identical across the runs you
+compare.
 
 ### Retrieval scope (`--retrieval-scope pool|corpus`)
 
-*What the retriever searches* — orthogonal to the backend above. Both `run` and
-`run-baseline` take it; keep it identical across the runs you compare.
+*What the retriever searches* — orthogonal to the backend above. Keep it
+identical across the runs you compare.
 
 - **`pool`** (default): retrieve from each example's own ~10-paragraph bundled
   pool, with gold labels straight from the dataset. Retrieval is easy (the gold is
@@ -266,15 +225,15 @@ and the in-harness baseline you compare it to.
     recall failures, small enough to index in memory with BM25 on a laptop. Gold
     titles match exactly (same dataset), so labeling is exact.
   - **`kilt`** (Stage 2, not yet built): the full Wikipedia FAISS/e5 index — the
-    literal open-domain "20GB" tier that matches MEM1's setup. Needs a GPU/large-RAM
-    box; it drops into the same `CorpusIndex` interface, so nothing else changes.
+    literal open-domain "20GB" tier that matches Search-R1's setup. Needs a
+    GPU/large-RAM box; it drops into the same `CorpusIndex` interface, so nothing
+    else changes.
 
 Suggested progression: develop and anchor the clean-Oracle result on `pool`,
 show it survives realistic retrieval locally on `corpus --corpus-source union`,
-then (on a GPU box) run `corpus --corpus-source kilt` **plus** MEM1 in-harness on
-the same index for the final open-domain comparison. The rung-to-rung
-decomposition is clean at every tier; the corpus tiers only add external realism /
-comparability.
+then (on a GPU box) run `corpus --corpus-source kilt` for the final open-domain
+tier. The rung-to-rung decomposition is clean at every tier; the corpus tiers
+only add external realism.
 
 ```bash
 # local realism tier (no GPU): same grid, shared union corpus
@@ -304,23 +263,19 @@ measured inference costs. H3's summarizer calls show up honestly in `infer_token
 ladder/
   blocks.py       # Block + Context (the c_1..c_K history and budget B)
   tokenizer.py    # token-accurate budgets (fixed Qwen tokenizer; no fallback)
-  data.py         # dataset loaders + MEM1 multi-objective construction
-  retriever.py    # dependency-free BM25 + make_retriever(bm25|e5) factory
+  data.py         # dataset loaders + multi-objective construction
+  retrieval.py    # BM25 retriever + lexical/e5 selection scorer (make_retriever / make_scorer)
   dense.py        # optional e5 (intfloat/e5-base-v2) dense retriever + scorer
-  scoring.py      # training-free lexical relevance + make_scorer(bm25|e5)
-  summarizer.py   # query-focused summarizer (H3 only)
-  policies.py     # H0, H1, H2, H3, Oracle  <-- the ladder
-  prompts.py      # 3 prompt variants for the sensitivity finding
+  policies.py     # H0, H1, H2, H3, Oracle + the H3 query-focused summarizer  <-- the ladder
+  llm.py          # frozen backbone wrapper + the 3 ReAct prompt variants
   agent.py        # the fixed ReAct environment shared by all rungs
-  metrics.py      # primary MEM1-table + secondary standard-QA scoring
-  runner.py       # sweep policies x budgets x datasets x N (+ run_baseline_grid)
-  aggregate.py    # decomposition table + gaps + % of oracle + baseline overlays
-  baselines/
-    mem1.py       # MEM1 (RL) run in-harness against our retriever (no-caveat tier)
-  cli.py          # prepare-data / run / run-baseline / aggregate
+  report.py       # mem1_table + standard_qa scoring, aggregation, decomposition table
+  runner.py       # sweep policies x budgets x datasets x N
+  corpus.py       # shared 'corpus' retrieval scope (union / kilt)
+  kilt.py         # Stage-2 full-Wikipedia FAISS/e5 index loader
+  cli.py          # prepare-data / run / aggregate
 tests/            # offline behavioural tests for the rungs and metrics
 configs/preregistration.yaml       # the pre-registered grid (planning doc)
-configs/published_baselines.json   # transcribed MEM1/BACM-RL/PEEK numbers + caveats
 ```
 
 ## Tests

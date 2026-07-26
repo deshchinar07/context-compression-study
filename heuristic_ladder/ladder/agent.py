@@ -16,14 +16,12 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-from . import prompts
+from . import llm as prompts
 from .blocks import Block, Context, OBSERVATION, QUESTION
 from .data import Example
 from .llm import LLMBackend
-from .policies import Policy
-from .retriever import make_retriever
-from .scoring import make_scorer
-from .summarizer import Summarizer
+from .policies import Policy, Summarizer
+from .retrieval import make_retriever, make_scorer
 
 _SEARCH_RE = re.compile(r"<search>(.*?)(?:</search>|$)", re.DOTALL)
 _ANSWER_RE = re.compile(r"<answer>(.*?)(?:</answer>|$)", re.DOTALL)

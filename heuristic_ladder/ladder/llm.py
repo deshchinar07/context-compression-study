@@ -1,9 +1,10 @@
-"""Backbone LLM access.
+"""Backbone LLM access + the ReAct prompt templates.
 
-A thin, provider-agnostic wrapper over an OpenAI-compatible chat endpoint. The
-default target is DeepInfra serving a *frozen* ``Qwen/Qwen2.5-7B-Instruct`` -- the
-shared backbone across Search-R1 / MEM1 / BACM-RL / FoldAct, which is what makes
-the heuristic-vs-learned comparison legitimate.
+A thin, provider-agnostic wrapper over an OpenAI-compatible chat endpoint, plus
+the prompt strings the agent and the H3 summarizer use. The default target is
+DeepInfra serving a *frozen* ``Qwen/Qwen2.5-7B-Instruct`` -- the shared backbone
+across Search-R1 / BACM-RL / FoldAct, which is what makes the heuristic-vs-learned
+comparison legitimate.
 
 Determinism: temperature is 0 by default, so a given context yields a fixed
 continuation. Every rung of the ladder uses the *same* backend instance and the
@@ -14,6 +15,97 @@ measured inference tokens (not estimates).
 """
 
 from __future__ import annotations
+
+# --- prompt templates --------------------------------------------------------
+
+SINGLE = {
+    "v0": (
+        "Answer the question. You must reason inside <think> and </think> first. "
+        "If you need facts, search with <search> keywords </search>; the top results "
+        "will appear inside <information> and </information>. You may search multiple "
+        "times. When you have enough information, give the final answer inside "
+        "<answer> and </answer> using only the essential words, e.g. <answer> Beijing "
+        "</answer>.\nQuestion: {questions}\n"
+    ),
+    "v1": (  # terse
+        "Solve the question with reasoning and search.\n"
+        "Format: <think>...</think> then either <search>query</search> or "
+        "<answer>short answer</answer>. Search results come back in "
+        "<information>...</information>.\nQuestion: {questions}\n"
+    ),
+    "v2": (  # verbose
+        "You are a careful research assistant answering a factual question. Think "
+        "step by step inside <think> and </think>. Whenever you are missing a fact, "
+        "issue a search query inside <search> and </search> and read the passages "
+        "returned inside <information> and </information>. Search as many times as you "
+        "need, one query at a time. Once you are confident, respond with the final, "
+        "concise answer inside <answer> and </answer> (only the essential words).\n"
+        "Question: {questions}\n"
+    ),
+}
+
+MULTI = {
+    "v0": (
+        "You will answer multiple questions using iterative reasoning and search. "
+        "Reason inside <think> and </think>. To gather facts, issue ONE query at a "
+        "time inside <search> and </search>; results appear inside <information> and "
+        "</information>. When every question is answered, provide all final answers, "
+        "separated by semicolons, inside <answer> answer1; answer2; ... </answer>. "
+        "Each answer must be concise -- only the essential words.\n"
+        "Answer the following questions: {questions}\n"
+    ),
+    "v1": (  # terse
+        "Answer all the questions below using reasoning and search.\n"
+        "Format: <think>...</think> then <search>query</search> (one at a time) or "
+        "<answer>a1; a2; ...</answer>. Results come in <information>...</information>.\n"
+        "Questions: {questions}\n"
+    ),
+    "v2": (  # verbose
+        "You are answering several factual questions at once. Maintain your reasoning "
+        "inside <think> and </think>. Search for missing facts ONE query at a time "
+        "inside <search> and </search>; passages return inside <information> and "
+        "</information>. Only once ALL questions can be answered, output every answer "
+        "in order, separated by semicolons, inside <answer> ... </answer>, each answer "
+        "concise.\nAnswer the following questions: {questions}\n"
+    ),
+}
+
+CONTINUE_CUE = (
+    "\nNow produce your next step: a <think>...</think> followed by exactly one "
+    "<search>...</search> or <answer>...</answer>."
+)
+
+# Used when the model burned its turn inside <think> without emitting an action.
+# Paired with an assistant prefill of <answer> so the model continues in-answer.
+COMMIT_CUE = (
+    "\nStop reasoning. Using the information above, give the final short answer now."
+)
+
+FORCE_ANSWER_CUE = (
+    "\nCRITICAL: Using only the information above, output ONLY the final "
+    "answer(s) inside <answer> and </answer>. "
+    "Do NOT write <think>, do NOT search, do NOT explain. "
+    "Example: <answer>Beijing</answer>"
+)
+
+FORCE_ANSWER_RETRY_CUE = (
+    "\nYour previous reply was invalid. Reply with exactly one line of the form "
+    "<answer>ANSWER</answer> and nothing else."
+)
+
+FORCE_ANSWER_SYSTEM = (
+    "You extract short factual answers. Reply with only "
+    "<answer>...</answer>. Never use <think> or any other tags."
+)
+
+
+def instruction(n_objectives: int, variant: str, questions: str) -> str:
+    table = SINGLE if n_objectives <= 1 else MULTI
+    if variant not in table:
+        raise ValueError(f"unknown prompt variant {variant!r}; have {list(table)}")
+    return table[variant].format(questions=questions)
+
+# --- LLM backend ---------------------------------------------------------------
 
 import os
 import time
@@ -103,39 +195,3 @@ class LLMBackend:
                 last_err = e
                 time.sleep(min(2 ** attempt, 30))
         raise RuntimeError(f"LLM call failed after {self.max_retries} retries: {last_err}")
-
-    def complete_raw(
-        self,
-        prompt: str,
-        stop: Optional[List[str]] = None,
-        max_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
-        top_p: float = 0.95,
-    ) -> str:
-        """Raw (non-chat) text completion via the ``/v1/completions`` endpoint.
-
-        Needed by baselines like MEM1 that *continue* a partially-written assistant
-        turn (the chat endpoint cannot: it always starts a fresh assistant message).
-        The caller is responsible for building the exact prompt string (e.g. via a
-        chat template). Usage is tracked on the same counter as ``complete`` so cost
-        accounting stays unified.
-        """
-        last_err = None
-        for attempt in range(self.max_retries):
-            try:
-                resp = self._client.completions.create(
-                    model=self.model,
-                    prompt=prompt,
-                    temperature=self.temperature if temperature is None else temperature,
-                    max_tokens=max_tokens or self.max_tokens,
-                    stop=stop,
-                    top_p=top_p,
-                )
-                text = resp.choices[0].text or ""
-                if resp.usage:
-                    self.usage.add(resp.usage.prompt_tokens, resp.usage.completion_tokens)
-                return text
-            except Exception as e:  # noqa: BLE001
-                last_err = e
-                time.sleep(min(2 ** attempt, 30))
-        raise RuntimeError(f"raw LLM call failed after {self.max_retries} retries: {last_err}")

@@ -146,7 +146,7 @@ def build_kilt_corpus(index_dir: str, kind: str = "e5"):
     IDF over 21M passages is infeasible, and e5 matches the Search-R1/MEM1 setup.
     """
     from .corpus import CorpusIndex
-    from .scoring import ScorerFactory
+    from .retrieval import ScorerFactory
 
     retriever = FaissRetriever(index_dir)
     # e5 scorer needs no corpus stats (it embeds the query), so this is cheap.

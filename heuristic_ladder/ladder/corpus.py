@@ -32,8 +32,7 @@ from __future__ import annotations
 from typing import List, Sequence
 
 from .data import Example, Paragraph
-from .retriever import make_retriever
-from .scoring import ScorerFactory
+from .retrieval import ScorerFactory, make_retriever
 
 
 def build_union_corpus(examples: Sequence[Example]) -> List[Paragraph]:

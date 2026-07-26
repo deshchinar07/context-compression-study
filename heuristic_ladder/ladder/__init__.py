@@ -17,15 +17,13 @@ _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 __all__ = [
     "blocks",
     "tokenizer",
-    "metrics",
     "data",
-    "retriever",
+    "retrieval",
     "corpus",
     "kilt",
-    "scoring",
-    "summarizer",
     "policies",
     "llm",
     "agent",
     "runner",
+    "report",
 ]
