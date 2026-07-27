@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import math
 import re
 from collections import Counter
@@ -52,7 +53,7 @@ class BM25Retriever:
             for i in range(len(self.paragraphs))
             if i not in exclude_idx
         ]
-        scored.sort(key=lambda x: (-x[0], x[1]))  # score desc, then index asc (deterministic)
+        scored.sort(key=lambda x: (-x[0], x[1]))
         return [self.paragraphs[i] for _, i in scored[:topk]]
 
 
@@ -79,12 +80,77 @@ class LexicalScorer:
         return _bm25_score(self.q_terms, tf, sum(tf.values()), self._idf, self.k1, self.b, self._avgdl)
 
 
+E5_MODEL = "intfloat/e5-base-v2"
+
+
+@functools.lru_cache(maxsize=1)
+def _load_model():
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as e:
+        raise RuntimeError(
+            "dense retrieval needs sentence-transformers, which is not installed. "
+            "Run `pip install sentence-transformers` or use --retrieval bm25 "
+            "(the default, dependency-free path)."
+        ) from e
+    return SentenceTransformer(E5_MODEL)
+
+
+def _embed(texts: list[str], prefix: str):
+    import numpy as np
+
+    model = _load_model()
+    prefixed = [f"{prefix}{t}" for t in texts]
+    emb = model.encode(prefixed, normalize_embeddings=True, convert_to_numpy=True)
+    return np.asarray(emb, dtype=np.float32)
+
+
+class E5Retriever:
+
+    def __init__(self, paragraphs: list[Paragraph]):
+        self.paragraphs = paragraphs
+        docs = [f"{p.title} {p.text}" for p in paragraphs]
+        
+        self._doc_emb = _embed(docs, "passage: ") if docs else None
+
+    def search(
+        self,
+        query: str,
+        topk: int = 3,
+        exclude_idx: set | None = None,
+    ) -> list[Paragraph]:
+        exclude_idx = exclude_idx or set()
+        if len(self.paragraphs) == 0:
+            return []
+        q = _embed([query], "query: ")[0]
+        sims = self._doc_emb @ q
+        
+        order = sorted(
+            (i for i in range(len(self.paragraphs)) if i not in exclude_idx),
+            key=lambda i: (-float(sims[i]), i),
+        )
+        return [self.paragraphs[i] for i in order[:topk]]
+
+
+class E5Scorer:
+
+    def __init__(self, passage_texts: list[str], query: str, **_ignore):
+        
+        
+        self._q = _embed([query], "query: ")[0]
+
+    def score(self, text: str) -> float:
+        if not text.strip():
+            return 0.0
+        v = _embed([text], "passage: ")[0]
+        return 1.0 + float(v @ self._q)
+
+
 def make_retriever(kind: str, paragraphs: list[Paragraph]):
     kind = (kind or "bm25").lower()
     if kind == "bm25":
         return BM25Retriever(paragraphs)
     if kind == "e5":
-        from .dense import E5Retriever
         return E5Retriever(paragraphs)
     raise ValueError(f"unknown retriever kind {kind!r}; choose 'bm25' or 'e5'")
 
@@ -94,6 +160,5 @@ def make_scorer(kind: str, passage_texts: list[str], query: str):
     if kind == "bm25":
         return LexicalScorer(passage_texts, query)
     if kind == "e5":
-        from .dense import E5Scorer
         return E5Scorer(passage_texts, query)
     raise ValueError(f"unknown scorer kind {kind!r}; choose 'bm25' or 'e5'")

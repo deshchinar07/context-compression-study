@@ -15,7 +15,7 @@ from .llm import (
     instruction,
 )
 from .policies import Policy, Summarizer
-from .retrieval import make_retriever, make_scorer
+from .retrieval_scoring import make_retriever, make_scorer
 
 _SEARCH_RE = re.compile(r"<search>(.*?)(?:</search>|$)", re.DOTALL)
 _ANSWER_RE = re.compile(r"<answer>(.*?)(?:</answer>|$)", re.DOTALL)
@@ -60,8 +60,6 @@ class RunResult:
 
 
 def _parse_action(text: str):
-    """Return ('answer', str) | ('search', str) | (None, None), taking the FIRST
-    action tag that appears (the model reasons, then acts once)."""
     s_pos = text.find("<search>")
     a_pos = text.find("<answer>")
     if s_pos == -1 and a_pos == -1:
@@ -74,12 +72,6 @@ def _parse_action(text: str):
 
 
 def _force_answer(backend: LLMBackend, ctx: Context) -> str:
-    """Last-resort answer extraction when the ReAct loop never committed.
-
-    Qwen often ignores a soft force cue and burns max_tokens inside <think>.
-    Prefilling the assistant turn with ``<answer>`` makes the model continue
-    inside the answer span instead of opening a think block.
-    """
     out = backend.complete(
         ctx.render_prompt() + FORCE_ANSWER_CUE,
         stop=["</answer>"],
@@ -90,7 +82,7 @@ def _force_answer(backend: LLMBackend, ctx: Context) -> str:
     pred = _clean_answer(out)
     if pred:
         return pred
-    # Rare: provider rejected prefill or returned empty -- one plain retry.
+    
     out = backend.complete(
         ctx.render_prompt() + FORCE_ANSWER_RETRY_CUE,
         stop=["</answer>"],
@@ -140,14 +132,13 @@ class ReActAgent:
         commit_nudge_used = False
 
         def apply_search(payload: str) -> bool:
-            """Handle a <search> action. Return True to continue the loop, False to stop."""
             nonlocal n_searches, n_stale, peak
             n_searches += 1
             hits = retriever.search(payload, topk=self.topk, exclude_idx=retrieved_idx)
             new_hits = [p for p in hits if p.idx not in retrieved_idx]
             if not new_hits:
                 n_stale += 1
-                return n_stale < 2  # stop after 2 stale searches
+                return n_stale < 2
             for p in new_hits:
                 retrieved_idx.add(p.idx)
                 is_supporting = p.is_supporting
@@ -175,8 +166,7 @@ class ReActAgent:
             )
             kind, payload = _parse_action(out)
 
-            # Think-only / truncated turn: one hard commit nudge that prefills
-            # <answer> so the model cannot open a new <think> block.
+            
             if kind is None and not commit_nudge_used:
                 commit_nudge_used = True
                 out = self.backend.complete(
@@ -186,10 +176,10 @@ class ReActAgent:
                     assistant_prefix="<answer>",
                 )
                 kind, payload = _parse_action(out)
-                # If it somehow still didn't answer, leave kind as None and fall
-                # through to forced answer after the loop.
+                
+                
                 if kind is None:
-                    # Prefill may have returned bare answer text without tags.
+                    
                     bare = (out or "").replace("<answer>", "").replace("</answer>", "").strip()
                     if bare and "<think>" not in bare and "<search>" not in bare:
                         kind, payload = "answer", bare
@@ -204,7 +194,7 @@ class ReActAgent:
                     break
                 continue
 
-            # Still no parseable action after the commit nudge (or nudge already used).
+            
             break
 
         if not answered:

@@ -1,18 +1,3 @@
-"""Backbone LLM access + the ReAct prompt templates.
-
-A thin, provider-agnostic wrapper over an OpenAI-compatible chat endpoint, plus
-the prompt strings the agent and the H3 summarizer use. The default target is
-DeepInfra serving a *frozen* ``Qwen/Qwen2.5-7B-Instruct`` -- the shared backbone
-across Search-R1 / BACM-RL / FoldAct, which is what makes the heuristic-vs-learned
-comparison legitimate.
-
-Determinism: temperature is 0 by default, so a given context yields a fixed
-continuation. Every rung of the ladder uses the *same* backend instance and the
-*same* decoding parameters; only the context they build differs.
-
-Every call's token usage is captured so cost can be reported against real,
-measured inference tokens (not estimates).
-"""
 
 from __future__ import annotations
 
@@ -23,7 +8,6 @@ from typing import List, Optional
 
 from .tokenizer import BACKBONE_MODEL
 
-# --- prompt templates --------------------------------------------------------
 
 SINGLE = {
     "v0": (
@@ -34,13 +18,13 @@ SINGLE = {
         "<answer> and </answer> using only the essential words, e.g. <answer> Beijing "
         "</answer>.\nQuestion: {questions}\n"
     ),
-    "v1": (  # terse
+    "v1": (
         "Solve the question with reasoning and search.\n"
         "Format: <think>...</think> then either <search>query</search> or "
         "<answer>short answer</answer>. Search results come back in "
         "<information>...</information>.\nQuestion: {questions}\n"
     ),
-    "v2": (  # verbose
+    "v2": (
         "You are a careful research assistant answering a factual question. Think "
         "step by step inside <think> and </think>. Whenever you are missing a fact, "
         "issue a search query inside <search> and </search> and read the passages "
@@ -61,13 +45,13 @@ MULTI = {
         "Each answer must be concise -- only the essential words.\n"
         "Answer the following questions: {questions}\n"
     ),
-    "v1": (  # terse
+    "v1": (
         "Answer all the questions below using reasoning and search.\n"
         "Format: <think>...</think> then <search>query</search> (one at a time) or "
         "<answer>a1; a2; ...</answer>. Results come in <information>...</information>.\n"
         "Questions: {questions}\n"
     ),
-    "v2": (  # verbose
+    "v2": (
         "You are answering several factual questions at once. Maintain your reasoning "
         "inside <think> and </think>. Search for missing facts ONE query at a time "
         "inside <search> and </search>; passages return inside <information> and "
@@ -82,8 +66,7 @@ CONTINUE_CUE = (
     "<search>...</search> or <answer>...</answer>."
 )
 
-# Used when the model burned its turn inside <think> without emitting an action.
-# Paired with an assistant prefill of <answer> so the model continues in-answer.
+
 COMMIT_CUE = (
     "\nStop reasoning. Using the information above, give the final short answer now."
 )
@@ -112,7 +95,6 @@ def instruction(n_objectives: int, variant: str, questions: str) -> str:
         raise ValueError(f"unknown prompt variant {variant!r}; have {list(table)}")
     return table[variant].format(questions=questions)
 
-# --- LLM backend ---------------------------------------------------------------
 
 @dataclass
 class Usage:
@@ -156,12 +138,6 @@ class LLMBackend:
         system: Optional[str] = None,
         assistant_prefix: Optional[str] = None,
     ) -> str:
-        """Single chat completion. Retries with exponential backoff on transient errors.
-
-        ``assistant_prefix`` (e.g. ``"<answer>"``) prefills the assistant turn so the
-        model continues from that text -- used to force an answer tag when the model
-        otherwise burns its budget inside ``<think>``.
-        """
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -180,13 +156,13 @@ class LLMBackend:
                     stop=stop,
                 )
                 text = resp.choices[0].message.content or ""
-                # Some servers echo the prefill; others return only the continuation.
+                
                 if assistant_prefix and not text.startswith(assistant_prefix):
                     text = assistant_prefix + text
                 if resp.usage:
                     self.usage.add(resp.usage.prompt_tokens, resp.usage.completion_tokens)
                 return text
-            except Exception as e:  # noqa: BLE001 - provider errors vary; retry then raise
+            except Exception as e:
                 last_err = e
                 time.sleep(min(2 ** attempt, 30))
         raise RuntimeError(f"LLM call failed after {self.max_retries} retries: {last_err}")

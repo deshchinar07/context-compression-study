@@ -1,11 +1,3 @@
-"""Experiment runner: sweep policies x budgets x datasets x objective-counts.
-
-For each example we run *every* policy under identical conditions (same backbone,
-same decoding, same retriever, same prompt), score the prediction under both the
-primary ``mem1_table`` protocol and secondary ``standard_qa`` diagnostic, and
-append one JSON row per (example, policy, budget) to a results file. A fresh
-policy instance is created per run so its compression counters are per-run.
-"""
 
 from __future__ import annotations
 

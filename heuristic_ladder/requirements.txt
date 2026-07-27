@@ -6,6 +6,6 @@ transformers>=4.44        # the Qwen2.5 tokenizer -- required, no fallback (see 
 numpy>=1.24
 PyYAML>=6.0
 
-# Optional: only needed for `--retrieval e5` (dense retrieval/scoring, ladder/dense.py).
+# Optional: only needed for `--retrieval e5` (dense retrieval/scoring in ladder/retrieval_scoring.py).
 # The default bm25 path does not require this.
 # sentence-transformers>=3.0

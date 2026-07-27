@@ -227,8 +227,7 @@ ladder/
   blocks.py       # Block + Context (the c_1..c_K history and budget B)
   tokenizer.py    # token-accurate budgets (fixed Qwen tokenizer; no fallback)
   data.py         # dataset loaders + multi-objective construction
-  retrieval.py    # BM25 retriever + lexical/e5 selection scorer (make_retriever / make_scorer)
-  dense.py        # optional e5 (intfloat/e5-base-v2) dense retriever + scorer
+  retrieval_scoring.py  # BM25 + e5 retrievers and selection scorers (make_retriever / make_scorer)
   policies.py     # H0, H1, H2, H3, Oracle + the H3 query-focused summarizer  <-- the ladder
   llm.py          # frozen backbone wrapper + the 3 ReAct prompt variants
   agent.py        # the fixed ReAct environment shared by all rungs

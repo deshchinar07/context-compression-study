@@ -7,7 +7,6 @@ BACKBONE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
 
 class _Counter:
-    """Wraps the loaded tokenizer behind one uniform ``.count()`` call."""
 
     def __init__(self, encode_fn):
         self._encode = encode_fn

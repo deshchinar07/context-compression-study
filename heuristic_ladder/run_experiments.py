@@ -1,90 +1,40 @@
 #!/usr/bin/env python3
-"""Central entry point + config for the heuristic-ladder harness.
-
-Edit the CONFIG block below and run:  ``python run_experiments.py``
-Everything the CLI (`python -m ladder ...`) can do is drivable from here; this
-file just puts every knob in one place with labels. Set ``MODE`` to pick the
-action, tweak the relevant section, run.
-
---------------------------------------------------------------------------------
-THE RETRIEVAL BACKEND (the main axis you will change)
---------------------------------------------------------------------------------
-  RETRIEVAL="bm25"  (default) -- sparse, dependency-free. The clean-Oracle tier.
-  RETRIEVAL="e5"           -- intfloat/e5-base-v2 dense retriever Search-R1 uses
-      (needs sentence-transformers). Aligns the ranking algorithm with that setup.
-
-Keep RETRIEVAL IDENTICAL between runs you compare, or the comparison is confounded.
-
---------------------------------------------------------------------------------
-EQUIVALENT CLI COMMANDS (what each is for)
---------------------------------------------------------------------------------
-# 0) One-time download + cache as local JSONL (needs network; do this first).
-python -m ladder prepare-data --datasets hotpotqa,2wiki,musique --splits test
-
-# 1) POOL pilot -- smoke-test the whole loop + clean-Oracle numbers (dev default).
-python -m ladder run --datasets hotpotqa --n-objectives 1 \
-  --budgets 512,256 --policies H0,H1,H2,H3,Oracle --limit 20 \
-  --out results/pool_pilot.jsonl
-
-# 2) POOL multi-objective sweep -- the core clean-Oracle decomposition figure.
-python -m ladder run --datasets hotpotqa,2wiki --n-objectives 2,8,16,32 \
-  --budgets 16000,8000,4000 --policies H0,H1,H2,H3,Oracle --limit 200 \
-  --out results/pool_multiobj.jsonl
-
-# 3) Aggregate -- decomposition table, % of Oracle, gaps, recall column.
-python -m ladder aggregate --results results/pool_multiobj.jsonl
-
-# Local serving on macOS (no CUDA): serve Qwen via MLX/Ollama/LM Studio and set
-#   BASE_URL below to that endpoint (e.g. http://localhost:8000/v1). vLLM is
-#   CUDA-only; see the README "Backbone fidelity" note for the caveats.
---------------------------------------------------------------------------------
-"""
 
 from __future__ import annotations
 
-# ============================================================================
-# CONFIG  ---  edit this block, then run `python run_experiments.py`
-# ============================================================================
 
-# Which action to run: "prepare-data" | "run" | "aggregate".
 MODE = "run"
 
-# --- Data -------------------------------------------------------------------
-DATASETS = ["hotpotqa"]          # subset of: hotpotqa, 2wiki, musique
-SPLITS = ["test"]                # test = validation split; dev = slice of train
-N_OBJECTIVES = [1]               # multi-objective packing (e.g. [2,8,16,32])
-LIMIT = 20                       # cap on #tasks (None = all). Counts TASKS, not sub-questions.
+
+DATASETS = ["hotpotqa"]
+SPLITS = ["test"]
+N_OBJECTIVES = [1]
+LIMIT = 20
 SEED = 0
-CACHE_DIR = "data"               # local JSONL cache (download once, reuse forever)
+CACHE_DIR = "data"
 
-# --- Retrieval backend (see the note at the top) ----------------------------
-RETRIEVAL = "bm25"               # ranking backend: "bm25" (default) | "e5" (dense)
 
-# --- Ladder run knobs (MODE="run") ------------------------------------------
+RETRIEVAL = "bm25"
+
+
 POLICIES = ["H0", "H1", "H2", "H3", "Oracle"]
-BUDGETS = [512, 256]             # token budgets; must bind or rungs coincide (see README)
-MAX_STEPS = 8                    # max ReAct steps per example
-TOPK = 3                         # passages returned per search
-PROMPT_VARIANT = "v0"            # "v0" | "v1" | "v2" (for prompt-sensitivity checks)
-SUMMARY_MAX_WORDS = 40           # H3's summary length (the single dev-set knob)
+BUDGETS = [512, 256]
+MAX_STEPS = 8
+TOPK = 3
+PROMPT_VARIANT = "v0"
+SUMMARY_MAX_WORDS = 40
 RUN_OUT = "results/pool_pilot.jsonl"
 
-# --- Backbone / endpoint (the frozen LLM every rung shares) -----------------
-# NOTE: MODEL must equal the tokenizer's BACKBONE_MODEL (single-backbone study).
-#       Change it in ladder/tokenizer.py if you truly need a different backbone.
-MODEL = None                     # None -> use tokenizer.BACKBONE_MODEL
-BASE_URL = "https://api.deepinfra.com/v1/openai"   # or a local OpenAI-compatible endpoint
-API_KEY_ENV = "DEEPINFRA_API_KEY"                  # env var holding the key (.env is auto-loaded)
-TEMPERATURE = 0.0                # 0 = deterministic (the fairness premise)
+
+MODEL = None
+BASE_URL = "https://api.deepinfra.com/v1/openai"
+API_KEY_ENV = "DEEPINFRA_API_KEY"
+TEMPERATURE = 0.0
 MAX_TOKENS = 512
 
-# --- Aggregate knobs (MODE="aggregate") -------------------------------------
-AGG_RESULTS = "results/pool_pilot.jsonl"   # one path, or comma-separated to combine
-AGG_METRIC = "both"              # "both" | a specific key (see ladder/report.py)
 
-# ============================================================================
-# END CONFIG  ---  logic below; you normally do not need to edit past here.
-# ============================================================================
+AGG_RESULTS = "results/pool_pilot.jsonl"
+AGG_METRIC = "both"
 
 
 def _backend(model, base_url, api_key_env, temperature, max_tokens=MAX_TOKENS):
@@ -93,8 +43,8 @@ def _backend(model, base_url, api_key_env, temperature, max_tokens=MAX_TOKENS):
 
     resolved = model or BACKBONE_MODEL
     if resolved != BACKBONE_MODEL:
-        # Budgets are always counted with BACKBONE_MODEL's tokenizer; a mismatched
-        # serving model would make "budget=X tokens" mean something different.
+        
+        
         print(
             f"WARNING: MODEL {resolved!r} != tokenizer BACKBONE_MODEL {BACKBONE_MODEL!r}. "
             "Token budgets are still counted against BACKBONE_MODEL. Only override if "
@@ -109,7 +59,7 @@ def _backend(model, base_url, api_key_env, temperature, max_tokens=MAX_TOKENS):
 def main():
     from ladder.cli import _load_dotenv
 
-    _load_dotenv()  # populate API keys from a .env at repo root (does not overwrite)
+    _load_dotenv()
 
     if MODE == "prepare-data":
         from ladder.data import load_examples

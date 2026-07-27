@@ -1,12 +1,3 @@
-"""Command-line entrypoint: prepare-data, run, aggregate.
-
-Usage (from the heuristic_ladder/ directory):
-
-    python -m ladder prepare-data --datasets hotpotqa,2wiki,musique --splits test
-    python -m ladder run   --datasets hotpotqa --n-objectives 1 --budgets 1024,512 \
-                            --policies H0,H1,H2,H3,Oracle --limit 20 --out results/run.jsonl
-    python -m ladder aggregate --results results/run.jsonl
-"""
 
 from __future__ import annotations
 
@@ -18,7 +9,6 @@ from .tokenizer import BACKBONE_MODEL
 
 
 def _load_dotenv(path: str = ".env") -> None:
-    """Minimal .env loader (no dependency). Does not overwrite existing env vars."""
     for candidate in (path, os.path.join("..", path)):
         if os.path.exists(candidate):
             for line in open(candidate, encoding="utf-8"):
@@ -59,11 +49,8 @@ def cmd_run(args):
     from .tokenizer import BACKBONE_MODEL
 
     if args.model != BACKBONE_MODEL:
-        # Token budgets are always computed with BACKBONE_MODEL's tokenizer
-        # (see ladder/tokenizer.py) -- there is no per-run tokenizer swap. Calling
-        # a different model here would silently make "budget=X tokens" mean a
-        # different thing than what was actually counted, which this harness
-        # refuses to do quietly.
+        
+        
         raise SystemExit(
             f"--model {args.model!r} does not match the fixed backbone "
             f"{BACKBONE_MODEL!r} that ladder/tokenizer.py counts against. "

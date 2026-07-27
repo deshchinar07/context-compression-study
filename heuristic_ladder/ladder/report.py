@@ -1,23 +1,3 @@
-"""Answer-quality metrics + result aggregation into the decomposition table.
-
-Two clearly separated evaluation protocols are reported and never conflated:
-
-* ``mem1_table`` is the primary/headline protocol: lowercase, replace punctuation
-  with spaces, normalize whitespace (articles are *not* removed); set-based token
-  overlap for F1; strict semicolon splitting; zero for the entire example when the
-  predicted answer count is wrong. This is the protocol directly comparable to the
-  MEM1 paper's reported F1.
-* ``standard_qa`` is a secondary diagnostic: conventional SQuAD/HotpotQA
-  normalization and Counter-based token F1, padding/truncating malformed
-  multi-objective output so correctly answered objectives still receive credit.
-  Never compare a ``standard_qa`` number directly against a MEM1 table.
-
-``aggregate`` groups result rows by (dataset, split, n_objectives, budget) and
-means them plainly -- no smoothing, weighting, or cherry-picking. ``format_report``
-renders the ladder rungs and the four decomposition gaps (H0->H1 timing, H1->H2
-selection, H2->H3 selection++, H3->Oracle headroom) and each rung's percent of the
-Oracle ceiling. Cost columns are protocol-independent.
-"""
 
 from __future__ import annotations
 
@@ -28,7 +8,6 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Sequence
 
-# --- metrics -------------------------------------------------------------------
 
 def standard_qa_normalize(s: str) -> str:
     def remove_articles(text):
@@ -48,7 +27,6 @@ def standard_qa_normalize(s: str) -> str:
 
 
 def standard_qa_em(prediction: str, golden_answers) -> int:
-    """SQuAD/HotpotQA normalized exact match against any acceptable answer."""
     if isinstance(golden_answers, str):
         golden_answers = [golden_answers]
     norm_pred = standard_qa_normalize(prediction)
@@ -59,7 +37,6 @@ def standard_qa_em(prediction: str, golden_answers) -> int:
 
 
 def standard_qa_f1(prediction: str, golden_answers) -> float:
-    """SQuAD-style token F1; max over acceptable gold answers."""
     if isinstance(golden_answers, str):
         golden_answers = [golden_answers]
     pred_tokens = standard_qa_normalize(prediction).split()
@@ -82,7 +59,6 @@ def standard_qa_f1(prediction: str, golden_answers) -> float:
 
 
 def mem1_normalize(s: str) -> str:
-    """Match ``MEM1-main/Mem1/inference/eval.py::preprocess_text``."""
     text = s.lower()
     for punct in string.punctuation:
         text = text.replace(punct, " ")
@@ -90,7 +66,6 @@ def mem1_normalize(s: str) -> str:
 
 
 def mem1_em(prediction: str, golden_answers) -> int:
-    """MEM1 normalized exact match against any acceptable answer."""
     if isinstance(golden_answers, str):
         golden_answers = [golden_answers]
     prediction = mem1_normalize(prediction)
@@ -98,7 +73,6 @@ def mem1_em(prediction: str, golden_answers) -> int:
 
 
 def mem1_f1(prediction: str, golden_answers) -> float:
-    """MEM1's set-based token F1, max over acceptable gold answers."""
     if isinstance(golden_answers, str):
         golden_answers = [golden_answers]
     pred_tokens = set(mem1_normalize(prediction).split())
@@ -120,7 +94,6 @@ def mem1_f1(prediction: str, golden_answers) -> float:
 
 @dataclass
 class AnswerScore:
-    """Per-example scores. For single-objective, the summed_* equal the single value."""
 
     summed_em: float
     summed_f1: float
@@ -137,14 +110,12 @@ class AnswerScore:
 
 @dataclass
 class EvaluationScores:
-    """Both protocols for one prediction; labels are intentionally explicit."""
 
     mem1_table: AnswerScore
     standard_qa: AnswerScore
 
 
 def standard_qa_split(prediction: str, n_expected: int) -> List[str]:
-    """Forgiving split: pad/truncate so valid objectives retain diagnostic credit."""
     parts = [p.strip() for p in prediction.split(";")] if prediction else []
     if len(parts) < n_expected:
         parts = parts + [""] * (n_expected - len(parts))
@@ -154,11 +125,6 @@ def standard_qa_split(prediction: str, n_expected: int) -> List[str]:
 def score_mem1_table(
     prediction: str, gold_per_objective: Sequence[Sequence[str]]
 ) -> AnswerScore:
-    """Exact MEM1 table protocol for answer-content scoring.
-
-    MEM1 splits on semicolons and returns zero for the whole example unless the
-    resulting answer count exactly equals the objective count.
-    """
     n = len(gold_per_objective)
     predictions = prediction.split(";")
     if len(predictions) != n:
@@ -175,7 +141,6 @@ def score_mem1_table(
 def score_standard_qa(
     prediction: str, gold_per_objective: Sequence[Sequence[str]]
 ) -> AnswerScore:
-    """Forgiving SQuAD/HotpotQA diagnostic scoring."""
     n = len(gold_per_objective)
     predictions = standard_qa_split(prediction, n)
     summed_em = 0.0
@@ -189,17 +154,11 @@ def score_standard_qa(
 def score_prediction(
     prediction: str, gold_per_objective: Sequence[Sequence[str]]
 ) -> EvaluationScores:
-    """Score one prediction under both named protocols.
-
-    ``gold_per_objective`` is a list (one per sub-question) of acceptable gold
-    answers. For single-objective this is a length-1 list.
-    """
     return EvaluationScores(
         mem1_table=score_mem1_table(prediction, gold_per_objective),
         standard_qa=score_standard_qa(prediction, gold_per_objective),
     )
 
-# --- aggregation --------------------------------------------------------------
 
 LADDER_ORDER = ["H0", "H1", "H2", "H3", "Oracle"]
 SCORE_METRICS = [
@@ -215,11 +174,6 @@ SCORE_METRICS = [
 
 
 def load_rows(path: str) -> List[dict]:
-    """Load result rows from one path or several comma-separated paths.
-
-    Multiple files let you combine several runs (e.g. a bm25 run and an e5 run)
-    into a single report.
-    """
     rows = []
     for one in str(path).split(","):
         one = one.strip()
@@ -241,7 +195,6 @@ def _mean(xs: List[float]) -> float:
 
 
 def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
-    """group -> policy -> aggregated metrics."""
     groups: Dict[tuple, Dict[str, List[dict]]] = defaultdict(lambda: defaultdict(list))
     for r in rows:
         key = (r["dataset"], r.get("split", "?"), r["n_objectives"], r["budget"])
@@ -274,9 +227,8 @@ def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
                         for x in rs
                     ]
                 ),
-                # Gold-retrieval recall: did the retriever surface the gold at all
-                # across the agent's searches? Separates retrieval miss (gold ranked
-                # below top-k) from selection error. Falls back to 1.0 when unknown.
+                
+                
                 "gold_recall": _mean(
                     [
                         (x["gold_titles_retrieved"] / x["gold_titles_total"])
@@ -289,7 +241,6 @@ def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
                 metrics[metric] = _mean([x[metric] for x in rs])
             out[key][pol] = metrics
     return out
-
 
 
 def format_report(
@@ -321,7 +272,7 @@ def format_report(
                 f"{m['compress_summarized']:>6.1f}{m['supp_kept_frac']:>9.2f}"
                 f"{m['gold_recall']:>8.2f}"
             )
-        # the four decomposition gaps
+        
         def g(a, b):
             if a in by_pol and b in by_pol:
                 return by_pol[b][metric] - by_pol[a][metric]

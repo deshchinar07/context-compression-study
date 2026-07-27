@@ -1,17 +1,11 @@
-"""Offline behavioural tests for the five rungs.
-
-Token counts are set explicitly on each Block so the tests are deterministic and
-do not depend on which tokenizer is available (no network needed). A DummyScorer
-and DummySummarizer make the selection/summarize decisions fully controllable.
-"""
 
 import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from ladder.blocks import Block, Context, QUESTION, OBSERVATION, SUMMARY  # noqa: E402
-from ladder.policies import H0, H1, H2, H3, Oracle  # noqa: E402
+from ladder.blocks import Block, Context, QUESTION, OBSERVATION, SUMMARY
+from ladder.policies import H0, H1, H2, H3, Oracle
 
 
 class DummyScorer:
@@ -46,8 +40,8 @@ def test_h0_can_discard_the_question():
     p = H0()
     for i, name in enumerate(["A", "B", "C"], start=1):
         p.on_append(ctx, _obs(i, name))
-    # H0 has no protection: appending pushed past 10 and the oldest (the question)
-    # was truncated away.
+    
+    
     roles = [b.role for b in ctx.blocks]
     assert QUESTION not in roles, "H0 must be able to drop the question"
     assert ctx.used() <= ctx.budget
@@ -56,8 +50,8 @@ def test_h0_can_discard_the_question():
 def test_h1_pins_question_and_drops_oldest():
     ctx = Context(budget=8, blocks=[_q()])
     p = H1()
-    p.on_append(ctx, _obs(1, "A"))  # fits: Q+A = 8
-    p.on_append(ctx, _obs(2, "B"))  # evicts oldest evidence (A), keeps Q
+    p.on_append(ctx, _obs(1, "A"))
+    p.on_append(ctx, _obs(2, "B"))
     titles = [b.source_title for b in ctx.blocks if b.role == OBSERVATION]
     assert ctx.blocks[0].role == QUESTION, "H1 must pin the question"
     assert titles == ["B"], "H1 drops oldest (FIFO) evidence"
@@ -68,9 +62,9 @@ def test_h2_drops_least_relevant_not_oldest():
     scorer = DummyScorer({"hi": 5.0, "lo": 0.0, "mid": 2.0})
     ctx = Context(budget=12, blocks=[_q()])
     p = H2()
-    p.on_append(ctx, _obs(1, "hi"), scorer=scorer)   # Q+hi = 8
-    p.on_append(ctx, _obs(2, "lo"), scorer=scorer)   # Q+hi+lo = 12
-    p.on_append(ctx, _obs(3, "mid"), scorer=scorer)  # must evict "lo" (lowest score)
+    p.on_append(ctx, _obs(1, "hi"), scorer=scorer)
+    p.on_append(ctx, _obs(2, "lo"), scorer=scorer)
+    p.on_append(ctx, _obs(3, "mid"), scorer=scorer)
     kept = {b.source_title for b in ctx.blocks if b.role == OBSERVATION}
     assert kept == {"hi", "mid"}, f"H2 should keep high-relevance, drop 'lo'; got {kept}"
 
@@ -80,12 +74,12 @@ def test_h3_summarizes_and_anchors_recent():
     summ = DummySummarizer(note="tiny")
     ctx = Context(budget=12, blocks=[_q()])
     p = H3()
-    p.on_append(ctx, _obs(1, "A"), scorer=scorer, summarizer=summ)  # Q+A
-    p.on_append(ctx, _obs(2, "B"), scorer=scorer, summarizer=summ)  # Q+A+B = 12
-    p.on_append(ctx, _obs(3, "C"), scorer=scorer, summarizer=summ)  # over budget -> compress
+    p.on_append(ctx, _obs(1, "A"), scorer=scorer, summarizer=summ)
+    p.on_append(ctx, _obs(2, "B"), scorer=scorer, summarizer=summ)
+    p.on_append(ctx, _obs(3, "C"), scorer=scorer, summarizer=summ)
     assert p.stats.summarized >= 1, "H3 must attempt summarization before deleting"
     assert ctx.blocks[0].role == QUESTION, "H3 must keep the question"
-    # B is the most-recent observation at the moment of compression -> anchored.
+    
     titles = [b.source_title for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
     assert "B" in titles, "H3 must anchor the most-recent observation"
 
@@ -94,8 +88,8 @@ def test_oracle_keeps_supporting_drops_distractor():
     ctx = Context(budget=12, blocks=[_q()])
     p = Oracle()
     p.on_append(ctx, _obs(1, "supp", supporting=True))
-    p.on_append(ctx, _obs(2, "dist", supporting=False))   # Q+supp+dist = 12
-    p.on_append(ctx, _obs(3, "dist2", supporting=False))  # evict lowest gold = a distractor
+    p.on_append(ctx, _obs(2, "dist", supporting=False))
+    p.on_append(ctx, _obs(3, "dist2", supporting=False))
     kept = {b.source_title for b in ctx.blocks if b.role == OBSERVATION}
     assert "supp" in kept, "Oracle must retain gold supporting evidence"
     assert "dist" not in kept, "Oracle should shed distractors first"

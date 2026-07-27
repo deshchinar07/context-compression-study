@@ -1,11 +1,10 @@
-"""Offline tests for primary MEM1-table and secondary standard-QA scoring."""
 
 import os
 import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from ladder.report import (  # noqa: E402
+from ladder.report import (
     mem1_em,
     mem1_f1,
     mem1_normalize,
@@ -17,7 +16,7 @@ from ladder.report import (  # noqa: E402
 
 
 def test_protocol_normalization_differs_as_expected():
-    # Standard QA removes English articles; MEM1's preprocess_text does not.
+    
     assert standard_qa_normalize("The  Beatles!") == "beatles"
     assert mem1_normalize("The  Beatles!") == "the beatles"
 

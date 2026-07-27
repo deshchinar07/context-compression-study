@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""Compare e5 vs bm25 selection on the matched slices.
-
-For N=1 we filter the bm25 n=200 run down to the same 100 example_ids the e5
-n=100 run used (both seed=0), so the comparison is apples-to-apples.
-"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -53,7 +48,7 @@ def main():
     e5_mhp = load_rows(RES / "pool_multiobj_n100_e5.jsonl")
     e5_m2w = load_rows(RES / "pool_multiobj_2wiki_e5.jsonl")
 
-    # N=1: filter bm25 n=200 to the same 100 ids as e5
+    
     keep = ids_of(e5_hp1)
     bm200_match = filter_ids(bm200, keep)
 

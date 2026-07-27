@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""Summarize and plot ladder F1 across the main experimental runs.
-
-Usage (from heuristic_ladder/):
-  python scripts/plot_ladder_results.py
-  python scripts/plot_ladder_results.py --out-dir results/figures
-
-Reads the JSONL files under results/ and prints a table + saves PNG charts.
-"""
 
 from __future__ import annotations
 
@@ -81,7 +73,6 @@ def n_examples(rows, **filt) -> int:
 
 
 def build_runs(results_dir: Path) -> list[dict]:
-    """Named experiment slices to compare."""
     pool200 = load_rows(results_dir / "pool_hotpot_n200.jsonl")
     multi_hp = load_rows(results_dir / "pool_multiobj_n100.jsonl")
     multi_2w = load_rows(results_dir / "pool_multiobj_2wiki.jsonl")
@@ -98,7 +89,7 @@ def build_runs(results_dir: Path) -> list[dict]:
     runs = []
     for name, rows, filt in specs:
         means = mean_by_policy(rows, **filt)
-        if all(v != v for v in means.values()):  # all NaN
+        if all(v != v for v in means.values()):
             continue
         runs.append(
             {
@@ -118,8 +109,6 @@ def build_runs(results_dir: Path) -> list[dict]:
 
 
 def build_e5_comparison(results_dir: Path) -> list[dict]:
-    """bm25 vs e5 on matched slices. For N=1, filter bm25 n=200 to the e5 n=100
-    example_ids so the comparison is apples-to-apples (both seed=0)."""
     bm200 = load_rows(results_dir / "pool_hotpot_n200.jsonl")
     bm_mhp = load_rows(results_dir / "pool_multiobj_n100.jsonl")
     bm_m2w = load_rows(results_dir / "pool_multiobj_2wiki.jsonl")
@@ -154,7 +143,7 @@ def plot_e5_comparison(comp: list[dict], out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
 
-    # 1) F1 by rung: bm25 vs e5, grouped per slice
+    
     fig, ax = plt.subplots(figsize=(10, 5))
     x = range(len(comp))
     width = 0.35
@@ -174,7 +163,7 @@ def plot_e5_comparison(comp: list[dict], out_dir: Path) -> list[Path]:
     plt.close(fig)
     paths.append(p1)
 
-    # 2) Selection gap (H2-H1) bm25 vs e5 — the key cross-backend number
+    
     fig, ax = plt.subplots(figsize=(8, 4.5))
     x = range(len(comp))
     width = 0.35
@@ -225,7 +214,7 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
 
-    # 1) Grouped bars: each run as a group of 5 rungs
+    
     fig, ax = plt.subplots(figsize=(12, 5))
     x = range(len(runs))
     width = 0.15
@@ -245,7 +234,7 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
     plt.close(fig)
     paths.append(p1)
 
-    # 2) Line chart: rungs on x-axis, one line per run (binding-budget subset)
+    
     focus = [r for r in runs if "B=512" in r["name"]]
     fig, ax = plt.subplots(figsize=(8, 5))
     for run in focus:
@@ -261,7 +250,7 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
     plt.close(fig)
     paths.append(p2)
 
-    # 3) Gap stacked / grouped for B=512 runs
+    
     fig, ax = plt.subplots(figsize=(9, 4.5))
     gap_keys = ["timing", "selection", "selection++", "headroom"]
     x = range(len(focus))
@@ -309,7 +298,7 @@ def main() -> None:
 
     if not args.no_plot:
         paths = plot_runs(runs, args.out_dir)
-        # e5 vs bm25 sensitivity (only if e5 files are present)
+        
         try:
             comp = build_e5_comparison(args.results_dir)
         except FileNotFoundError:

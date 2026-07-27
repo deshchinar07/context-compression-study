@@ -6,17 +6,14 @@ from typing import List, Optional
 from . import tokenizer
 
 QUESTION = "question"
-
 THOUGHT = "thought"
 ACTION = "action"
-
 OBSERVATION = "observation"
 SUMMARY = "summary"
 
 
 @dataclass
 class Block:
-    """One segment of agent interaction history."""
 
     id: int
     role: str
