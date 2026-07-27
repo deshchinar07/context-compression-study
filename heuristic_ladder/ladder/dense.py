@@ -92,9 +92,9 @@ class E5Scorer:
     semantics the policies rely on.
     """
 
-    def __init__(self, corpus_texts: List[str], query: str, **_ignore):
-        # corpus_texts is accepted for interface parity with LexicalScorer (it uses
-        # it to estimate IDF); e5 needs no corpus statistics, so it is ignored.
+    def __init__(self, passage_texts: List[str], query: str, **_ignore):
+        # passage_texts is accepted for interface parity with LexicalScorer (it uses
+        # it to estimate IDF); e5 needs no passage statistics, so it is ignored.
         self._q = _embed([query], "query: ")[0]
 
     def score(self, text: str) -> float:

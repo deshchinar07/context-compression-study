@@ -218,8 +218,8 @@ SCORE_METRICS = [
 def load_rows(path: str) -> List[dict]:
     """Load result rows from one path or several comma-separated paths.
 
-    Multiple files let you combine several runs (e.g. a pool run and a corpus
-    run, or a bm25 run and an e5 run) into a single report.
+    Multiple files let you combine several runs (e.g. a bm25 run and an e5 run)
+    into a single report.
     """
     rows = []
     for one in str(path).split(","):
@@ -262,7 +262,6 @@ def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
                 )
             metrics = {
                 "n": len(rs),
-                "retrieval_scope": rs[0].get("retrieval_scope", "pool"),
                 "peak_tokens": _mean([x["peak_context_tokens"] for x in rs]),
                 "infer_tokens": _mean([x["prompt_tokens"] + x["completion_tokens"] for x in rs]),
                 "llm_calls": _mean([x["llm_calls"] for x in rs]),
@@ -276,9 +275,9 @@ def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
                         for x in rs
                     ]
                 ),
-                # Gold-retrieval recall: did the retriever surface the gold at all?
-                # Separates retrieval error from selection error (see corpus.py).
-                # Falls back to 1.0 when unknown (older rows / no gold titles).
+                # Gold-retrieval recall: did the retriever surface the gold at all
+                # across the agent's searches? Separates retrieval miss (gold ranked
+                # below top-k) from selection error. Falls back to 1.0 when unknown.
                 "gold_recall": _mean(
                     [
                         (x["gold_titles_retrieved"] / x["gold_titles_total"])
@@ -307,11 +306,9 @@ def format_report(
         present = [p for p in LADDER_ORDER if p in by_pol]
         if not present:
             continue
-        scope = next(iter(by_pol.values())).get("retrieval_scope", "pool")
         lines.append("")
         lines.append(
-            f"=== {dataset} | split={split} | N_obj={n_obj} | budget={budget} "
-            f"| scope={scope} ==="
+            f"=== {dataset} | split={split} | N_obj={n_obj} | budget={budget} ==="
         )
         header = f"{'rung':<8}{'n':>5}{'  '}{metric:>9}{'%oracle':>9}{'peakTok':>9}{'inferTok':>9}{'compr':>7}{'summ':>6}{'suppKept':>9}{'recall':>8}"
         lines.append(header)

@@ -1,25 +1,20 @@
-"""The ReAct agent loop.
-
-This is the fixed *environment* shared by every rung of the ladder. Given an
-Example, a compression policy, and a token budget, it runs a think/search/answer
-loop over the example's own paragraph pool, invoking the policy at the single
-decision point where a new observation is about to be appended.
-
-Only the compression policy varies across runs; the backbone, decoding params,
-retriever, action space, and prompt are held fixed. That is what makes the
-cross-rung comparison legitimate.
-"""
-
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import Optional
 
-from . import llm as prompts
 from .blocks import Block, Context, OBSERVATION, QUESTION
 from .data import Example
-from .llm import LLMBackend
+from .llm import (
+    LLMBackend,
+    COMMIT_CUE,
+    CONTINUE_CUE,
+    FORCE_ANSWER_CUE,
+    FORCE_ANSWER_RETRY_CUE,
+    FORCE_ANSWER_SYSTEM,
+    instruction,
+)
 from .policies import Policy, Summarizer
 from .retrieval import make_retriever, make_scorer
 
@@ -29,14 +24,6 @@ _THINK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL)
 
 
 def _clean_answer(text: str) -> str:
-    """Best-effort answer extraction identical for every rung.
-
-    Prefer an explicit <answer> span; otherwise strip reasoning (<think>) and
-    dangling tags and return the remainder. A model that never commits to an
-    answer scores as such (matching the Search-R1/MEM1 convention that an
-    unanswered task gets no credit) -- but we never let stray reasoning text be
-    scored *as if* it were the answer for one rung and not another.
-    """
     m = _ANSWER_RE.search(text)
     if m:
         return m.group(1).strip()
@@ -61,20 +48,14 @@ class RunResult:
     peak_context_tokens: int = 0
     final_context_tokens: int = 0
     answered: bool = False
-    # compression stats
     compress_triggered: int = 0
     compress_dropped: int = 0
     compress_summarized: int = 0
-    # inference cost attributable to this run
     llm_calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    # kept for auditing which evidence survived to the final context
     final_supporting_kept: int = 0
     final_supporting_total: int = 0
-    # retrieval scope + gold-retrieval recall (separates retrieval error from
-    # selection error; under 'corpus' scope the retriever can miss the gold).
-    retrieval_scope: str = "pool"
     gold_titles_total: int = 0
     gold_titles_retrieved: int = 0
 
@@ -101,10 +82,10 @@ def _force_answer(backend: LLMBackend, ctx: Context) -> str:
     inside the answer span instead of opening a think block.
     """
     out = backend.complete(
-        ctx.render_prompt() + prompts.FORCE_ANSWER_CUE,
+        ctx.render_prompt() + FORCE_ANSWER_CUE,
         stop=["</answer>"],
         max_tokens=64,
-        system=prompts.FORCE_ANSWER_SYSTEM,
+        system=FORCE_ANSWER_SYSTEM,
         assistant_prefix="<answer>",
     )
     pred = _clean_answer(out)
@@ -112,10 +93,10 @@ def _force_answer(backend: LLMBackend, ctx: Context) -> str:
         return pred
     # Rare: provider rejected prefill or returned empty -- one plain retry.
     out = backend.complete(
-        ctx.render_prompt() + prompts.FORCE_ANSWER_RETRY_CUE,
+        ctx.render_prompt() + FORCE_ANSWER_RETRY_CUE,
         stop=["</answer>"],
         max_tokens=64,
-        system=prompts.FORCE_ANSWER_SYSTEM,
+        system=FORCE_ANSWER_SYSTEM,
         assistant_prefix="<answer>",
     )
     return _clean_answer(out)
@@ -129,50 +110,23 @@ class ReActAgent:
         topk: int = 3,
         prompt_variant: str = "v0",
         retrieval: str = "bm25",
-        retrieval_scope: str = "pool",
-        corpus_index=None,
     ):
         self.backend = backend
         self.max_steps = max_steps
         self.topk = topk
         self.prompt_variant = prompt_variant
         self.retrieval = retrieval
-        # 'pool' (default): per-example bundled pool, dataset gold labels.
-        # 'corpus': shared prebuilt index (``corpus_index``), gold assigned by
-        # title match at retrieval time. See ladder/corpus.py.
-        self.retrieval_scope = (retrieval_scope or "pool").lower()
-        self.corpus_index = corpus_index
 
-    def run(
-        self,
-        example: Example,
-        policy: Policy,
-        budget: int,
-        summary_max_words: int = 40,
-    ) -> RunResult:
+    def run(self,example: Example,policy: Policy,budget: int, summary_max_words: int = 40,) -> RunResult:
         query = " ; ".join(example.questions)
-        instr = prompts.instruction(example.n_objectives, self.prompt_variant, query)
+        instr = instruction(example.n_objectives, self.prompt_variant, query)
 
         ctx = Context(budget=budget, blocks=[Block(id=0, role=QUESTION, text=instr, step_idx=0)])
-        # Gold titles drive labeling under 'corpus' scope (retrieved passages carry
-        # no dataset label) and recall accounting under both scopes.
         gold_titles = example.supporting_titles
-        if self.retrieval_scope == "corpus":
-            if self.corpus_index is None:
-                raise RuntimeError(
-                    "retrieval_scope='corpus' requires a prebuilt corpus_index "
-                    "(build it once with ladder.corpus.build_corpus and pass it in)."
-                )
-            retriever = self.corpus_index
-            scorer = self.corpus_index.scorer_for(query)
-            label_by_title = True
-        else:
-            retriever = make_retriever(self.retrieval, example.paragraphs)
-            scorer = make_scorer(self.retrieval, [p.text for p in example.paragraphs], query)
-            label_by_title = False
+        retriever = make_retriever(self.retrieval, example.paragraphs)
+        scorer = make_scorer(self.retrieval, [p.text for p in example.paragraphs], query)
         summarizer = Summarizer(self.backend, max_words=summary_max_words)
 
-        # snapshot global usage so we can attribute this run's inference cost
         u0 = self.backend.usage
         base_calls, base_pt, base_ct = u0.n_calls, u0.prompt_tokens, u0.completion_tokens
 
@@ -197,13 +151,7 @@ class ReActAgent:
                 return n_stale < 2  # stop after 2 stale searches
             for p in new_hits:
                 retrieved_idx.add(p.idx)
-                # Under 'corpus' scope the passage is an unlabeled corpus doc;
-                # its gold status is decided here by title match. Under 'pool'
-                # scope the dataset label is authoritative (identical result,
-                # since a supporting paragraph's title is a gold title).
-                is_supporting = (
-                    (p.title in gold_titles) if label_by_title else p.is_supporting
-                )
+                is_supporting = p.is_supporting
                 if is_supporting:
                     retrieved_gold_titles.add(p.title)
                 pending = Block(
@@ -223,7 +171,7 @@ class ReActAgent:
 
         for step in range(1, self.max_steps + 1):
             out = self.backend.complete(
-                ctx.render_prompt() + prompts.CONTINUE_CUE,
+                ctx.render_prompt() + CONTINUE_CUE,
                 stop=["</search>", "</answer>", "<information>"],
             )
             kind, payload = _parse_action(out)
@@ -233,7 +181,7 @@ class ReActAgent:
             if kind is None and not commit_nudge_used:
                 commit_nudge_used = True
                 out = self.backend.complete(
-                    ctx.render_prompt() + prompts.COMMIT_CUE,
+                    ctx.render_prompt() + COMMIT_CUE,
                     stop=["</answer>", "</search>"],
                     max_tokens=64,
                     assistant_prefix="<answer>",
@@ -264,8 +212,6 @@ class ReActAgent:
             prediction = _force_answer(self.backend, ctx)
 
         u1 = self.backend.usage
-        # Denominator is the gold-title count so it is meaningful under both scopes
-        # (under 'corpus' the bundled pool is not the retrieval space).
         supporting_total = len(gold_titles)
         supporting_kept = sum(
             1 for b in ctx.blocks if b.role == OBSERVATION and b.is_supporting
@@ -292,7 +238,6 @@ class ReActAgent:
             completion_tokens=u1.completion_tokens - base_ct,
             final_supporting_kept=supporting_kept,
             final_supporting_total=supporting_total,
-            retrieval_scope=self.retrieval_scope,
             gold_titles_total=len(gold_titles),
             gold_titles_retrieved=len(retrieved_gold_titles),
         )

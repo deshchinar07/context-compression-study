@@ -93,9 +93,6 @@ def cmd_run(args):
         prompt_variant=args.prompt_variant,
         summary_max_words=args.summary_max_words,
         retrieval=args.retrieval,
-        retrieval_scope=args.retrieval_scope,
-        corpus_source=args.corpus_source,
-        corpus_index_dir=args.corpus_index_dir,
         cache_dir=args.cache_dir,
     )
 
@@ -145,40 +142,6 @@ def build_parser():
             "Ranking backend shared by retrieval and the selection scorer. 'bm25' "
             "(default) is sparse and dependency-free; 'e5' is the intfloat/e5-base-v2 "
             "dense retriever Search-R1 uses (needs sentence-transformers)."
-        ),
-    )
-    pr.add_argument(
-        "--retrieval-scope",
-        dest="retrieval_scope",
-        default="pool",
-        choices=["pool", "corpus"],
-        help=(
-            "'pool' (default): retrieve from each example's ~10-paragraph bundled "
-            "pool with dataset gold labels (easy retrieval, exact Oracle). 'corpus': "
-            "retrieve from one shared index; gold is assigned by title match at "
-            "retrieval time, so retrieval can miss the gold and the Oracle becomes "
-            "'perfect selection given retrieval' (gold-retrieval recall is recorded "
-            "per row). See ladder/corpus.py."
-        ),
-    )
-    pr.add_argument(
-        "--corpus-source",
-        dest="corpus_source",
-        default="union",
-        choices=["union", "kilt"],
-        help=(
-            "Only used with --retrieval-scope corpus. 'union' (default): the "
-            "deduplicated union of the split's own paragraphs (local, no download). "
-            "'kilt': the full Wikipedia FAISS/e5 index (Stage 2; needs --corpus-index-dir)."
-        ),
-    )
-    pr.add_argument(
-        "--corpus-index-dir",
-        dest="corpus_index_dir",
-        default=None,
-        help=(
-            "Only used with --corpus-source kilt: path to the prebuilt FAISS index "
-            "directory (index.faiss + passages.jsonl). See ladder/kilt.py."
         ),
     )
     pr.set_defaults(func=cmd_run)

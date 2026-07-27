@@ -36,7 +36,6 @@ def mean_by_policy(
     dataset: str | None = None,
     n_objectives: int | None = None,
     budget: int | None = None,
-    scope: str | None = None,
 ) -> dict[str, float]:
     buckets: dict[str, list[float]] = defaultdict(list)
     for r in rows:
@@ -45,9 +44,6 @@ def mean_by_policy(
         if n_objectives is not None and int(r.get("n_objectives", 1)) != n_objectives:
             continue
         if budget is not None and int(r["budget"]) != budget:
-            continue
-        sc = r.get("retrieval_scope", "pool")
-        if scope is not None and sc != scope:
             continue
         pol = r["policy"]
         if pol not in LADDER:
@@ -65,8 +61,6 @@ def mean_recall(rows, **filt) -> float:
             continue
         if filt.get("budget") is not None and int(r["budget"]) != filt["budget"]:
             continue
-        if filt.get("scope") and r.get("retrieval_scope", "pool") != filt["scope"]:
-            continue
         tot = r.get("gold_titles_total") or 0
         got = r.get("gold_titles_retrieved") or 0
         vals.append(got / tot if tot else 1.0)
@@ -82,8 +76,6 @@ def n_examples(rows, **filt) -> int:
             continue
         if filt.get("budget") is not None and int(r["budget"]) != filt["budget"]:
             continue
-        if filt.get("scope") and r.get("retrieval_scope", "pool") != filt["scope"]:
-            continue
         ids.add(r["example_id"])
     return len(ids)
 
@@ -93,17 +85,14 @@ def build_runs(results_dir: Path) -> list[dict]:
     pool200 = load_rows(results_dir / "pool_hotpot_n200.jsonl")
     multi_hp = load_rows(results_dir / "pool_multiobj_n100.jsonl")
     multi_2w = load_rows(results_dir / "pool_multiobj_2wiki.jsonl")
-    union = load_rows(results_dir / "union_hotpot_n100.jsonl")
 
     specs = [
-        ("Pool Hotpot N=1 B=512", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=512, scope="pool")),
-        ("Pool Hotpot N=1 B=256", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=256, scope="pool")),
-        ("Pool Hotpot N=2 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=2, budget=512, scope="pool")),
-        ("Pool Hotpot N=8 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=8, budget=512, scope="pool")),
-        ("Pool 2Wiki N=2 B=512", multi_2w, dict(dataset="2wiki", n_objectives=2, budget=512, scope="pool")),
-        ("Pool 2Wiki N=8 B=512", multi_2w, dict(dataset="2wiki", n_objectives=8, budget=512, scope="pool")),
-        ("Union Hotpot N=1 B=512", union, dict(dataset="hotpotqa", n_objectives=1, budget=512, scope="corpus")),
-        ("Union Hotpot N=1 B=1024", union, dict(dataset="hotpotqa", n_objectives=1, budget=1024, scope="corpus")),
+        ("Pool Hotpot N=1 B=512", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=512)),
+        ("Pool Hotpot N=1 B=256", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=256)),
+        ("Pool Hotpot N=2 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=2, budget=512)),
+        ("Pool Hotpot N=8 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=8, budget=512)),
+        ("Pool 2Wiki N=2 B=512", multi_2w, dict(dataset="2wiki", n_objectives=2, budget=512)),
+        ("Pool 2Wiki N=8 B=512", multi_2w, dict(dataset="2wiki", n_objectives=8, budget=512)),
     ]
 
     runs = []
@@ -144,11 +133,11 @@ def build_e5_comparison(results_dir: Path) -> list[dict]:
     out = []
     for name, bm_rows, e5_rows, filt in [
         ("Pool Hotpot N=1", bm200_match, e5_hp1,
-         dict(dataset="hotpotqa", n_objectives=1, budget=512, scope="pool")),
+         dict(dataset="hotpotqa", n_objectives=1, budget=512)),
         ("Pool Hotpot N=2", bm_mhp, e5_mhp,
-         dict(dataset="hotpotqa", n_objectives=2, budget=512, scope="pool")),
+         dict(dataset="hotpotqa", n_objectives=2, budget=512)),
         ("Pool 2Wiki N=2", bm_m2w, e5_m2w,
-         dict(dataset="2wiki", n_objectives=2, budget=512, scope="pool")),
+         dict(dataset="2wiki", n_objectives=2, budget=512)),
     ]:
         bm = mean_by_policy(bm_rows, **filt)
         e5 = mean_by_policy(e5_rows, **filt)

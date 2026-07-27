@@ -59,7 +59,7 @@ class BM25Retriever:
 class LexicalScorer:
     def __init__(
         self,
-        corpus_texts: list[str] | None = None,
+        passage_texts: list[str] | None = None,
         query: str = "",
         k1: float = 1.5,
         b: float = 0.75,
@@ -72,11 +72,7 @@ class LexicalScorer:
         if idf is not None and avgdl is not None:
             self._idf, self._avgdl = idf, avgdl
         else:
-            self._idf, self._avgdl = _bm25_stats([tokenize(t) for t in (corpus_texts or [])])
-
-    @staticmethod
-    def index_corpus(corpus_texts: list[str]) -> tuple:
-        return _bm25_stats([tokenize(t) for t in corpus_texts])
+            self._idf, self._avgdl = _bm25_stats([tokenize(t) for t in (passage_texts or [])])
 
     def score(self, text: str) -> float:
         tf = Counter(tokenize(text))
@@ -93,30 +89,11 @@ def make_retriever(kind: str, paragraphs: list[Paragraph]):
     raise ValueError(f"unknown retriever kind {kind!r}; choose 'bm25' or 'e5'")
 
 
-def make_scorer(kind: str, corpus_texts: list[str], query: str):
+def make_scorer(kind: str, passage_texts: list[str], query: str):
     kind = (kind or "bm25").lower()
     if kind == "bm25":
-        return LexicalScorer(corpus_texts, query)
+        return LexicalScorer(passage_texts, query)
     if kind == "e5":
         from .dense import E5Scorer
-        return E5Scorer(corpus_texts, query)
+        return E5Scorer(passage_texts, query)
     raise ValueError(f"unknown scorer kind {kind!r}; choose 'bm25' or 'e5'")
-
-
-class ScorerFactory:
-    """Index the corpus once, then mint cheap per-query scorers that reuse it."""
-
-    def __init__(self, kind: str, corpus_texts: list[str]):
-        self.kind = (kind or "bm25").lower()
-        if self.kind == "e5":
-            self._idf = self._avgdl = None
-        elif self.kind == "bm25":
-            self._idf, self._avgdl = LexicalScorer.index_corpus(corpus_texts)
-        else:
-            raise ValueError(f"unknown scorer kind {self.kind!r}; choose 'bm25' or 'e5'")
-
-    def for_query(self, query: str):
-        if self.kind == "bm25":
-            return LexicalScorer(query=query, idf=self._idf, avgdl=self._avgdl)
-        from .dense import E5Scorer
-        return E5Scorer([], query)

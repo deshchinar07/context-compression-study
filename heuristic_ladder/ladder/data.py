@@ -14,9 +14,9 @@ so the whole study is self-contained -- no 20GB Wikipedia index required -- and
 the supporting labels map cleanly onto retrieved paragraphs.
 
 The MEM1 multi-objective construction (``build_multi_objective``) concatenates N
-single questions into one task; the union of their pools becomes the corpus and a
-paragraph is "supporting" if it supports *any* sub-question. summed-F1 / summed-EM
-over the N answers is then directly comparable to MEM1's tables.
+single questions into one task; the union of their pools becomes the passage
+set and a paragraph is "supporting" if it supports *any* sub-question. summed-F1
+/ summed-EM over the N answers is then directly comparable to MEM1's tables.
 """
 
 from __future__ import annotations

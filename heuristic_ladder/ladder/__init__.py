@@ -19,8 +19,6 @@ __all__ = [
     "tokenizer",
     "data",
     "retrieval",
-    "corpus",
-    "kilt",
     "policies",
     "llm",
     "agent",

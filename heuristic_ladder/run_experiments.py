@@ -7,22 +7,13 @@ file just puts every knob in one place with labels. Set ``MODE`` to pick the
 action, tweak the relevant section, run.
 
 --------------------------------------------------------------------------------
-THE THREE RETRIEVAL TIERS (the main axis you will change)
+THE RETRIEVAL BACKEND (the main axis you will change)
 --------------------------------------------------------------------------------
-  RETRIEVAL_SCOPE="pool"                      -> each example's ~10-paragraph pool.
-      Easy retrieval, EXACT Oracle. Use for development + the clean-Oracle
-      primary result. Runs anywhere.
-  RETRIEVAL_SCOPE="corpus", CORPUS_SOURCE="union"
-      -> one shared index = the dedup union of the split's paragraphs (~66k for
-      HotpotQA). Real recall failures, Oracle-given-retrieval, recall reported.
-      Local, no GPU. Use as the realistic robustness tier on your laptop.
-  RETRIEVAL_SCOPE="corpus", CORPUS_SOURCE="kilt", CORPUS_INDEX_DIR=<path>
-      -> the full Wikipedia FAISS/e5 index (the "20GB" open-domain tier, matches
-      Search-R1's setup). Needs a prebuilt index + a GPU/large-RAM box. Use for the
-      final open-domain comparison. Build the index off-box (see ladder/kilt.py).
+  RETRIEVAL="bm25"  (default) -- sparse, dependency-free. The clean-Oracle tier.
+  RETRIEVAL="e5"           -- intfloat/e5-base-v2 dense retriever Search-R1 uses
+      (needs sentence-transformers). Aligns the ranking algorithm with that setup.
 
-Keep RETRIEVAL / RETRIEVAL_SCOPE / CORPUS_SOURCE IDENTICAL between runs you
-compare, or the comparison is confounded.
+Keep RETRIEVAL IDENTICAL between runs you compare, or the comparison is confounded.
 
 --------------------------------------------------------------------------------
 EQUIVALENT CLI COMMANDS (what each is for)
@@ -40,22 +31,8 @@ python -m ladder run --datasets hotpotqa,2wiki --n-objectives 2,8,16,32 \
   --budgets 16000,8000,4000 --policies H0,H1,H2,H3,Oracle --limit 200 \
   --out results/pool_multiobj.jsonl
 
-# 3) UNION corpus run -- same grid under realistic local retrieval (no GPU).
-#    Checks whether the bounded pool was compressing the rung gaps.
-python -m ladder run --datasets hotpotqa --retrieval-scope corpus --corpus-source union \
-  --budgets 512,256 --policies H0,H1,H2,H3,Oracle --limit 200 \
-  --out results/union_run.jsonl
-
-# 4) KILT / 20GB run -- final open-domain tier (GPU box + prebuilt index).
-python -m ladder run --datasets hotpotqa --retrieval-scope corpus --corpus-source kilt \
-  --corpus-index-dir /path/to/kilt_index --retrieval e5 \
-  --budgets 4000 --policies H0,H1,H2,H3,Oracle --limit 200 \
-  --out results/kilt_run.jsonl
-
-# 5) Aggregate -- decomposition table, % of Oracle, gaps, recall column.
-#    Pass several comma-separated files to combine runs in one report.
+# 3) Aggregate -- decomposition table, % of Oracle, gaps, recall column.
 python -m ladder aggregate --results results/pool_multiobj.jsonl
-python -m ladder aggregate --results results/union_run.jsonl,results/kilt_run.jsonl
 
 # Local serving on macOS (no CUDA): serve Qwen via MLX/Ollama/LM Studio and set
 #   BASE_URL below to that endpoint (e.g. http://localhost:8000/v1). vLLM is
@@ -80,11 +57,8 @@ LIMIT = 20                       # cap on #tasks (None = all). Counts TASKS, not
 SEED = 0
 CACHE_DIR = "data"               # local JSONL cache (download once, reuse forever)
 
-# --- Retrieval tier (see the three-tiers note at the top) -------------------
+# --- Retrieval backend (see the note at the top) ----------------------------
 RETRIEVAL = "bm25"               # ranking backend: "bm25" (default) | "e5" (dense)
-RETRIEVAL_SCOPE = "pool"         # "pool" | "corpus"
-CORPUS_SOURCE = "union"          # if scope=corpus: "union" (local) | "kilt" (20GB)
-CORPUS_INDEX_DIR = None          # if source=kilt: path to prebuilt FAISS index dir
 
 # --- Ladder run knobs (MODE="run") ------------------------------------------
 POLICIES = ["H0", "H1", "H2", "H3", "Oracle"]
@@ -158,8 +132,7 @@ def main():
             backend=_backend(MODEL, BASE_URL, API_KEY_ENV, TEMPERATURE),
             max_steps=MAX_STEPS, topk=TOPK, prompt_variant=PROMPT_VARIANT,
             summary_max_words=SUMMARY_MAX_WORDS,
-            retrieval=RETRIEVAL, retrieval_scope=RETRIEVAL_SCOPE,
-            corpus_source=CORPUS_SOURCE, corpus_index_dir=CORPUS_INDEX_DIR,
+            retrieval=RETRIEVAL,
             cache_dir=CACHE_DIR,
         )
         return

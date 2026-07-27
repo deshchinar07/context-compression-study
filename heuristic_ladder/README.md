@@ -15,7 +15,7 @@ H3  -> Oracle : how much headroom is left to perfect selection?    (CEILING)
 Learned methods (MEM1, BACM-RL, ...) are **not** a rung — they never decomposed
 timing vs. selection, so where they land relative to H3 and Oracle is the
 *finding*. This harness does not run their code; comparing against their
-published numbers is a separate, confounded step (different retrieval corpus
+published numbers is a separate, confounded step (different retrieval setup
 and often a different/RL-trained backbone) and is left to future work. The
 internal rung-to-rung gaps here need no such caveat — they share one retriever,
 backbone, and prompt.
@@ -82,7 +82,7 @@ you can trust the backbone, which is the fairness premise of the whole harness:
   BACM-RL ran against. The internal rung-to-rung gaps (H0→H1→H2→H3→Oracle) stay
   clean regardless — they share one backend — but any number you place next to a
   *published* table inherits this backbone-fidelity caveat on top of the
-  retrieval-scope one described in *Comparing to published baselines*.
+  retrieval-setup one described in *Comparison to learned methods*.
 - **Local, full-precision (vLLM/TGI) = the no-caveat tier.** You control the exact
   weights, precision, and decoding, and the run is reproducible. This is the only
   tier where "it is literally the same frozen backbone" is a claim you can stand
@@ -184,9 +184,9 @@ methods (MEM1, BACM-RL/FoldAct, PEEK). Two facts keep that comparison honest:
    one retriever, backbone, and prompt, so their *relative* differences are
    clean regardless of how our setup compares to any paper.
 2. **Any number placed next to a published table is confounded.** Those numbers
-   came from full-corpus retrieval (whole-Wikipedia dense index) and often a
-   different/RL-trained backbone; ours come from a small bundled gold+distractor
-   pool on a frozen Qwen2.5-7B-Instruct. A raw win/loss is therefore *not* yet
+   came from whole-Wikipedia dense retrieval and often a different/RL-trained
+   backbone; ours come from a small bundled gold+distractor pool on a frozen
+   Qwen2.5-7B-Instruct. A raw win/loss is therefore *not* yet
    evidence about policy quality.
 
 The clean fix — re-run the learned checkpoint **inside this harness** against
@@ -203,43 +203,6 @@ uses by default — for the retriever *and* the H2/H3 selection scorer, so you c
 align the ranking algorithm with that setup (`pip install
 sentence-transformers`). Whatever you pick, keep it identical across the runs you
 compare.
-
-### Retrieval scope (`--retrieval-scope pool|corpus`)
-
-*What the retriever searches* — orthogonal to the backend above. Keep it
-identical across the runs you compare.
-
-- **`pool`** (default): retrieve from each example's own ~10-paragraph bundled
-  pool, with gold labels straight from the dataset. Retrieval is easy (the gold is
-  always present) and the Oracle is **exact**. This is the clean-Oracle primary
-  condition and the fast dev loop.
-- **`corpus`**: retrieve from **one shared index** built once per (dataset,
-  split). Retrieved passages are unlabeled corpus docs, so gold is assigned by
-  **title match** against the example's supporting titles at retrieval time.
-  Retrieval can now genuinely miss the gold, so the Oracle becomes *perfect
-  selection given what was retrieved*, and **gold-retrieval recall** is reported
-  as its own column (in `aggregate`) so retrieval error and selection error stay
-  separable. Pick the corpus with `--corpus-source`:
-  - **`union`** (default, local, no download): the deduplicated union of the
-    split's own paragraphs (e.g. ~66k passages for HotpotQA). Big enough for real
-    recall failures, small enough to index in memory with BM25 on a laptop. Gold
-    titles match exactly (same dataset), so labeling is exact.
-  - **`kilt`** (Stage 2, not yet built): the full Wikipedia FAISS/e5 index — the
-    literal open-domain "20GB" tier that matches Search-R1's setup. Needs a
-    GPU/large-RAM box; it drops into the same `CorpusIndex` interface, so nothing
-    else changes.
-
-Suggested progression: develop and anchor the clean-Oracle result on `pool`,
-show it survives realistic retrieval locally on `corpus --corpus-source union`,
-then (on a GPU box) run `corpus --corpus-source kilt` for the final open-domain
-tier. The rung-to-rung decomposition is clean at every tier; the corpus tiers
-only add external realism.
-
-```bash
-# local realism tier (no GPU): same grid, shared union corpus
-python -m ladder run --datasets hotpotqa --retrieval-scope corpus --corpus-source union \
-  --budgets 512,256 --policies H0,H1,H2,H3,Oracle --limit 20 --out results/union_pilot.jsonl
-```
 
 ## Budget guidance (so compression actually binds)
 
@@ -271,8 +234,6 @@ ladder/
   agent.py        # the fixed ReAct environment shared by all rungs
   report.py       # mem1_table + standard_qa scoring, aggregation, decomposition table
   runner.py       # sweep policies x budgets x datasets x N
-  corpus.py       # shared 'corpus' retrieval scope (union / kilt)
-  kilt.py         # Stage-2 full-Wikipedia FAISS/e5 index loader
   cli.py          # prepare-data / run / aggregate
 tests/            # offline behavioural tests for the rungs and metrics
 configs/preregistration.yaml       # the pre-registered grid (planning doc)
