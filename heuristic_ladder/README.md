@@ -229,7 +229,7 @@ ladder/
   data.py         # dataset loaders + multi-objective construction
   retrieval_scoring.py  # BM25 + e5 retrievers and selection scorers (make_retriever / make_scorer)
   policies.py     # H0, H1, H2, H3, Oracle + the H3 query-focused summarizer  <-- the ladder
-  llm.py          # frozen backbone wrapper + the 3 ReAct prompt variants
+  llm.py          # frozen backbone wrapper + the ReAct prompt template
   agent.py        # the fixed ReAct environment shared by all rungs
   report.py       # mem1_table + standard_qa scoring, aggregation, decomposition table
   runner.py       # sweep policies x budgets x datasets x N

@@ -99,18 +99,16 @@ class ReActAgent:
         backend: LLMBackend,
         max_steps: int = 8,
         topk: int = 3,
-        prompt_variant: str = "v0",
         retrieval: str = "bm25",
     ):
         self.backend = backend
         self.max_steps = max_steps
         self.topk = topk
-        self.prompt_variant = prompt_variant
         self.retrieval = retrieval
 
     def run(self,example: Example,policy: Policy,budget: int, summary_max_words: int = 40,) -> RunResult:
         query = " ; ".join(example.questions)
-        instr = instruction(example.n_objectives, self.prompt_variant, query)
+        instr = instruction(example.n_objectives, query)
 
         ctx = Context(budget=budget, blocks=[Block(id=0, role=QUESTION, text=instr, step_idx=0)])
         gold_titles = example.supporting_titles

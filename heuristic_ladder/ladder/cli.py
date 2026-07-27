@@ -77,7 +77,6 @@ def cmd_run(args):
         backend=backend,
         max_steps=args.max_steps,
         topk=args.topk,
-        prompt_variant=args.prompt_variant,
         summary_max_words=args.summary_max_words,
         retrieval=args.retrieval,
         cache_dir=args.cache_dir,
@@ -119,7 +118,6 @@ def build_parser():
     pr.add_argument("--max-tokens", type=int, default=512)
     pr.add_argument("--max-steps", type=int, default=8)
     pr.add_argument("--topk", type=int, default=3)
-    pr.add_argument("--prompt-variant", default="v0")
     pr.add_argument("--summary-max-words", type=int, default=40)
     pr.add_argument(
         "--retrieval",

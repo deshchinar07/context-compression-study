@@ -21,7 +21,6 @@ POLICIES = ["H0", "H1", "H2", "H3", "Oracle"]
 BUDGETS = [512, 256]
 MAX_STEPS = 8
 TOPK = 3
-PROMPT_VARIANT = "v0"
 SUMMARY_MAX_WORDS = 40
 RUN_OUT = "results/pool_pilot.jsonl"
 
@@ -80,7 +79,7 @@ def main():
             budgets=BUDGETS, policies=POLICIES, out_path=RUN_OUT,
             limit=LIMIT, seed=SEED,
             backend=_backend(MODEL, BASE_URL, API_KEY_ENV, TEMPERATURE),
-            max_steps=MAX_STEPS, topk=TOPK, prompt_variant=PROMPT_VARIANT,
+            max_steps=MAX_STEPS, topk=TOPK,
             summary_max_words=SUMMARY_MAX_WORDS,
             retrieval=RETRIEVAL,
             cache_dir=CACHE_DIR,

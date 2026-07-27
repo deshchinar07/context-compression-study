@@ -275,7 +275,9 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(
+        description="Plot ladder decomposition figures (F1 by rung, curves, gaps) from results JSONL files."
+    )
     ap.add_argument(
         "--results-dir",
         type=Path,

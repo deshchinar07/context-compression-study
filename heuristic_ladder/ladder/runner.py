@@ -27,7 +27,6 @@ def run_grid(
     backend: Optional[LLMBackend] = None,
     max_steps: int = 8,
     topk: int = 3,
-    prompt_variant: str = "v0",
     summary_max_words: int = 40,
     retrieval: str = "bm25",
     cache_dir: str = "data",
@@ -36,7 +35,7 @@ def run_grid(
     backend = backend or LLMBackend()
     agent = ReActAgent(
         backend, max_steps=max_steps, topk=topk,
-        prompt_variant=prompt_variant, retrieval=retrieval,
+        retrieval=retrieval,
     )
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
 
@@ -45,7 +44,6 @@ def run_grid(
         "base_url": backend.base_url,
         "temperature": backend.temperature,
         "tokenizer": tokenizer.backend_name(),
-        "prompt_variant": prompt_variant,
         "retrieval": retrieval,
         "topk": topk,
         "max_steps": max_steps,
