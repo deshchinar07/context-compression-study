@@ -40,18 +40,15 @@ An OpenAI-compatible endpoint serving the backbone is also required. The default
 DEEPINFRA_API_KEY="your_key_here"
 ```
 
-To serve a **local** frozen Qwen instead — the stronger, no-caveat tier — run it with vLLM (`vllm serve Qwen/Qwen2.5-7B-Instruct`) and pass `--base-url http://localhost:8000/v1`. The code path is identical.
+To serve the backbone locally instead, run it with vLLM (`vllm serve Qwen/Qwen2.5-7B-Instruct`) and pass `--base-url http://localhost:8000/v1`. The code path is identical.
 
 ### Backbone fidelity
 
-The two tiers above differ in how much you can trust the backbone, which is the fairness premise of the harness:
+**What we did.** All reported results were produced against DeepInfra's hosted copy of `Qwen/Qwen2.5-7B-Instruct` at temperature 0. Because the weights are served by a third party, their precision is not visible to us, and the deployment may change over time, so a run is not bit-reproducible and cannot be certified as the exact reference weights prior work used.
 
-- **Hosted (DeepInfra) — the caveated tier.** You trust a provider's copy of the model. It may be quantized, it may be updated under you (so runs are not bit-reproducible), and it cannot be verified to be the exact frozen reference weights that prior work ran against. The internal rung-to-rung gaps stay clean regardless — they share one backend — but any number placed next to a *published* table inherits this caveat on top of the retrieval-setup one.
-- **Local, full-precision (vLLM/TGI) — the no-caveat tier.** You control the exact weights, precision, and decoding, and the run is reproducible. This is the only tier where "literally the same frozen backbone" is a defensible claim.
+This does not affect the harness's main claim. Every rung in a given run hits the same endpoint with the same decoding settings, so the rung-to-rung gaps — the quantity this study measures — are internally valid regardless of which copy of the model answers. What it does affect is any number placed directly beside a published table, which already carries a separate confound from the differing retrieval setup.
 
-**The macOS catch.** vLLM and HF TGI are CUDA-only, so the no-caveat tier is not reachable on Apple Silicon. Local Mac runtimes (MLX, Ollama, LM Studio) all speak the same OpenAI-compatible API and work via `--base-url`, but serve quantized weights by default, which reintroduces a smaller fidelity caveat. If you go this route: set a dummy key in `.env` (`DEEPINFRA_API_KEY="local"` — a key is required even locally), alias your local model to the exact id `Qwen/Qwen2.5-7B-Instruct` (e.g. `ollama cp qwen2.5:7b-instruct Qwen/Qwen2.5-7B-Instruct`), and note that the Qwen tokenizer is still fetched from HuggingFace for budget accounting regardless of who serves the model.
-
-**Recommendation.** Use hosted DeepInfra while iterating (a 7B at temperature 0 is cents per pilot); reserve a rented single CUDA GPU running vLLM for the final, pristine numbers. Switching is a one-line `--base-url` change.
+**Future work.** Re-run the final grid against a locally served, full-precision Qwen on a single CUDA GPU via vLLM. That fixes the weights, precision, and decoding under our own control and makes runs reproducible, so absolute scores become directly quotable rather than only internally comparable. It requires no code change — only a different `--base-url`.
 
 ## Data
 
