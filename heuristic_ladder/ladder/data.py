@@ -162,7 +162,7 @@ def load_single(
     path = _cache_path(cache_dir, dataset, hf_split)
 
     if os.path.exists(path):
-        examples = [_deserialize(l) for l in open(path, encoding="utf-8") if l.strip()]
+        examples = [_deserialize(line) for line in open(path, encoding="utf-8") if line.strip()]
     else:
         examples = _download(dataset, hf_split)
         with open(path, "w", encoding="utf-8") as f:

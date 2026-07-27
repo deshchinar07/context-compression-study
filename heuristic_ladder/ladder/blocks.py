@@ -58,9 +58,6 @@ class Context:
     def used(self) -> int:
         return sum(b.n_tokens for b in self.blocks)
 
-    def remaining(self) -> int:
-        """r_t = B - |C_t| (can go negative under H0's reactive overflow)."""
-        return self.budget - self.used()
 
     def render_prompt(self) -> str:
         return "\n".join(b.rendered() for b in self.blocks)

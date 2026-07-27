@@ -16,6 +16,13 @@ measured inference tokens (not estimates).
 
 from __future__ import annotations
 
+import os
+import time
+from dataclasses import dataclass, field
+from typing import List, Optional
+
+from .tokenizer import BACKBONE_MODEL
+
 # --- prompt templates --------------------------------------------------------
 
 SINGLE = {
@@ -107,14 +114,6 @@ def instruction(n_objectives: int, variant: str, questions: str) -> str:
 
 # --- LLM backend ---------------------------------------------------------------
 
-import os
-import time
-from dataclasses import dataclass, field
-from typing import List, Optional
-
-from .tokenizer import BACKBONE_MODEL
-
-
 @dataclass
 class Usage:
     prompt_tokens: int = 0
@@ -125,10 +124,6 @@ class Usage:
         self.prompt_tokens += prompt
         self.completion_tokens += completion
         self.n_calls += 1
-
-    @property
-    def total_tokens(self) -> int:
-        return self.prompt_tokens + self.completion_tokens
 
 
 @dataclass

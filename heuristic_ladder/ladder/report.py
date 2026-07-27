@@ -22,12 +22,11 @@ Oracle ceiling. Cost columns are protocol-independent.
 from __future__ import annotations
 
 import json
-import os
 import re
 import string
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Sequence
 
 # --- metrics -------------------------------------------------------------------
 

@@ -6,10 +6,9 @@ n=100 run used (both seed=0), so the comparison is apples-to-apples.
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from plot_ladder_results import LADDER, METRIC, load_rows, mean_by_policy
+from plot_ladder_results import LADDER, load_rows, mean_by_policy
 
 RES = Path(__file__).resolve().parents[1] / "results"
 
@@ -60,15 +59,15 @@ def main():
 
     show("Pool Hotpot N=1 B=512 (bm25 filtered to same 100 ids)",
          bm200_match, e5_hp1,
-         dict(dataset="hotpotqa", n_objectives=1, budget=512, scope="pool"))
+         dict(dataset="hotpotqa", n_objectives=1, budget=512))
 
     show("Pool Hotpot N=2 B=512",
          bm_mhp, e5_mhp,
-         dict(dataset="hotpotqa", n_objectives=2, budget=512, scope="pool"))
+         dict(dataset="hotpotqa", n_objectives=2, budget=512))
 
     show("Pool 2Wiki N=2 B=512",
          bm_m2w, e5_m2w,
-         dict(dataset="2wiki", n_objectives=2, budget=512, scope="pool"))
+         dict(dataset="2wiki", n_objectives=2, budget=512))
 
 
 if __name__ == "__main__":
