@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+
+def main():
+    from ladder.cli import _load_dotenv
+    from ladder.llm import LLMBackend
+    from ladder.tokenizer import BACKBONE_MODEL
+
+    _load_dotenv()
+
+    MODE = "run"
+
+    DATASETS = ["hotpotqa"]
+    SPLITS = ["test"]
+    N_OBJECTIVES = [1]
+    LIMIT = 20
+    SEED = 0
+    CACHE_DIR = "data"
+
+    RETRIEVAL = "bm25"
+
+    POLICIES = ["H0", "H1", "H2", "H3", "Oracle"]
+    BUDGETS = [512, 256]
+    MAX_STEPS = 8
+    TOPK = 3
+    SUMMARY_MAX_WORDS = 40
+    RUN_OUT = "results/pool_pilot.jsonl"
+
+    MODEL = None
+    BASE_URL = "https://api.deepinfra.com/v1/openai"
+    API_KEY_ENV = "DEEPINFRA_API_KEY"
+    TEMPERATURE = 0.0
+    MAX_TOKENS = 512
+
+    AGG_RESULTS = "results/pool_pilot.jsonl"
+    AGG_METRIC = "both"
+
+    resolved = MODEL or BACKBONE_MODEL
+    if resolved != BACKBONE_MODEL:
+        print(
+            f"WARNING: MODEL {resolved!r} != tokenizer BACKBONE_MODEL {BACKBONE_MODEL!r}. "
+            "Token budgets are still counted against BACKBONE_MODEL. Only override if "
+            "the served model shares that tokenizer."
+        )
+    backend = LLMBackend(
+        model=resolved, base_url=BASE_URL, api_key_env=API_KEY_ENV,
+        temperature=TEMPERATURE, max_tokens=MAX_TOKENS,
+    )
+
+    if MODE == "prepare-data":
+        from ladder.data import load_examples
+
+        for dataset in DATASETS:
+            for split in SPLITS:
+                for n in N_OBJECTIVES:
+                    ex = load_examples(dataset, split=split, n_objectives=n,
+                                       limit=LIMIT, seed=SEED, cache_dir=CACHE_DIR)
+                    print(f"{dataset}/{split} N={n}: {len(ex)} examples cached in {CACHE_DIR}/")
+        return
+
+    if MODE == "run":
+        from ladder.runner import run_grid
+
+        run_grid(
+            datasets=DATASETS, splits=SPLITS, n_objectives_list=N_OBJECTIVES,
+            budgets=BUDGETS, policies=POLICIES, out_path=RUN_OUT,
+            limit=LIMIT, seed=SEED,
+            backend=backend,
+            max_steps=MAX_STEPS, topk=TOPK,
+            summary_max_words=SUMMARY_MAX_WORDS,
+            retrieval=RETRIEVAL,
+            cache_dir=CACHE_DIR,
+        )
+        return
+
+    if MODE == "aggregate":
+        from ladder.report import report
+
+        print(report(AGG_RESULTS, metric=AGG_METRIC))
+        return
+
+    raise SystemExit(
+        f"unknown MODE {MODE!r}; choose 'prepare-data', 'run', 'aggregate'."
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
