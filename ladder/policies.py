@@ -31,7 +31,7 @@ class Summarizer:
     def summarize(self, text: str, query: str, max_words: Optional[int] = None) -> str:
         budget_words = max_words or self.max_words
         prompt = _PROMPT.format(budget_words=budget_words, query=query, text=text)
-        
+
         out = self.backend.complete(prompt, max_tokens=budget_words * 4)
         return out.strip()
 
@@ -72,7 +72,7 @@ class H1:
     def on_append(self, ctx: Context, pending: Block, *, scorer: Optional[LexicalScorer] = None, summarizer: Optional[Summarizer] = None, query: str = "") -> None:
         fired = False
         while ctx.used() + pending.n_tokens > ctx.budget:
-            
+
             candidates = [b for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
             if not candidates:
                 break
@@ -98,7 +98,7 @@ class H2:
             candidates = [b for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
             if not candidates:
                 break
-            
+
             victim = min(
                 candidates,
                 key=lambda b: (scorer.score(b.text), ctx.blocks.index(b)),
@@ -130,7 +130,7 @@ class H3:
     ) -> None:
         assert scorer is not None and summarizer is not None, "H3 needs scorer+summarizer"
         fired = False
-        
+
         while ctx.used() + pending.n_tokens > ctx.budget:
             anchor = ctx.most_recent_observation()
             candidates = [
@@ -143,8 +143,8 @@ class H3:
                 candidates,
                 key=lambda b: (scorer.score(b.text), ctx.blocks.index(b)),
             )
-            
-            
+
+
             if victim.role == OBSERVATION:
                 note = summarizer.summarize(victim.text, query, max_words=self.summary_max_words)
                 new_tokens = tokenizer.count_tokens(f"<memory>{note}</memory>")
@@ -155,7 +155,7 @@ class H3:
                     victim.recount()
                     fired = True
                     continue
-            
+
             ctx.remove(victim)
             self.stats.dropped += 1
             fired = True

@@ -73,17 +73,21 @@ def n_examples(rows, **filt) -> int:
 
 
 def build_runs(results_dir: Path) -> list[dict]:
-    pool200 = load_rows(results_dir / "pool_hotpot_n200.jsonl")
-    multi_hp = load_rows(results_dir / "pool_multiobj_n100.jsonl")
-    multi_2w = load_rows(results_dir / "pool_multiobj_2wiki.jsonl")
+    # Canonical BM25 grid: results/rerun/ (full re-run under the corrected harness).
+    rerun = results_dir / "rerun"
+    hotpot_n1 = load_rows(rerun / "rerun_hotpot_n1.jsonl")
+    hotpot_n2 = load_rows(rerun / "rerun_hotpot_n2.jsonl")
+    hotpot_n8 = load_rows(rerun / "rerun_hotpot_n8.jsonl")
+    wiki_n2 = load_rows(rerun / "rerun_2wiki_n2.jsonl")
+    wiki_n8 = load_rows(rerun / "rerun_2wiki_n8.jsonl")
 
     specs = [
-        ("Pool Hotpot N=1 B=512", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=512)),
-        ("Pool Hotpot N=1 B=256", pool200, dict(dataset="hotpotqa", n_objectives=1, budget=256)),
-        ("Pool Hotpot N=2 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=2, budget=512)),
-        ("Pool Hotpot N=8 B=512", multi_hp, dict(dataset="hotpotqa", n_objectives=8, budget=512)),
-        ("Pool 2Wiki N=2 B=512", multi_2w, dict(dataset="2wiki", n_objectives=2, budget=512)),
-        ("Pool 2Wiki N=8 B=512", multi_2w, dict(dataset="2wiki", n_objectives=8, budget=512)),
+        ("Pool Hotpot N=1 B=512", hotpot_n1, dict(dataset="hotpotqa", n_objectives=1, budget=512)),
+        ("Pool Hotpot N=1 B=256", hotpot_n1, dict(dataset="hotpotqa", n_objectives=1, budget=256)),
+        ("Pool Hotpot N=2 B=512", hotpot_n2, dict(dataset="hotpotqa", n_objectives=2, budget=512)),
+        ("Pool Hotpot N=8 B=512", hotpot_n8, dict(dataset="hotpotqa", n_objectives=8, budget=512)),
+        ("Pool 2Wiki N=2 B=512", wiki_n2, dict(dataset="2wiki", n_objectives=2, budget=512)),
+        ("Pool 2Wiki N=8 B=512", wiki_n8, dict(dataset="2wiki", n_objectives=8, budget=512)),
     ]
 
     runs = []
@@ -143,7 +147,7 @@ def plot_e5_comparison(comp: list[dict], out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
 
-    
+
     fig, ax = plt.subplots(figsize=(10, 5))
     x = range(len(comp))
     width = 0.35
@@ -163,7 +167,7 @@ def plot_e5_comparison(comp: list[dict], out_dir: Path) -> list[Path]:
     plt.close(fig)
     paths.append(p1)
 
-    
+
     fig, ax = plt.subplots(figsize=(8, 4.5))
     x = range(len(comp))
     width = 0.35
@@ -214,7 +218,7 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
 
-    
+
     fig, ax = plt.subplots(figsize=(12, 5))
     x = range(len(runs))
     width = 0.15
@@ -234,7 +238,7 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
     plt.close(fig)
     paths.append(p1)
 
-    
+
     focus = [r for r in runs if "B=512" in r["name"]]
     fig, ax = plt.subplots(figsize=(8, 5))
     for run in focus:
@@ -250,7 +254,7 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
     plt.close(fig)
     paths.append(p2)
 
-    
+
     fig, ax = plt.subplots(figsize=(9, 4.5))
     gap_keys = ["timing", "selection", "selection++", "headroom"]
     x = range(len(focus))
@@ -300,7 +304,7 @@ def main() -> None:
 
     if not args.no_plot:
         paths = plot_runs(runs, args.out_dir)
-        
+
         try:
             comp = build_e5_comparison(args.results_dir)
         except FileNotFoundError:

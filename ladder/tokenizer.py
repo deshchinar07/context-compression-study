@@ -1,5 +1,4 @@
 from __future__ import annotations
-from transformers import AutoTokenizer
 
 import functools
 
@@ -17,8 +16,10 @@ class _Counter:
         return len(self._encode(text))
 
 
-@functools.lru_cache(maxsize=1) 
+@functools.lru_cache(maxsize=1)
 def _load_counter() -> _Counter:
+    from transformers import AutoTokenizer
+
     tok = AutoTokenizer.from_pretrained(BACKBONE_MODEL)
     return _Counter(encode_fn=lambda t: tok.encode(t, add_special_tokens=False))
 

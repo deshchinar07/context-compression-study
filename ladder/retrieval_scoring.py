@@ -64,16 +64,10 @@ class LexicalScorer:
         query: str = "",
         k1: float = 1.5,
         b: float = 0.75,
-        *,
-        idf: dict | None = None,
-        avgdl: float | None = None,
     ):
         self.k1, self.b = k1, b
         self.q_terms = tokenize(query)
-        if idf is not None and avgdl is not None:
-            self._idf, self._avgdl = idf, avgdl
-        else:
-            self._idf, self._avgdl = _bm25_stats([tokenize(t) for t in (passage_texts or [])])
+        self._idf, self._avgdl = _bm25_stats([tokenize(t) for t in (passage_texts or [])])
 
     def score(self, text: str) -> float:
         tf = Counter(tokenize(text))
@@ -110,7 +104,7 @@ class E5Retriever:
     def __init__(self, paragraphs: list[Paragraph]):
         self.paragraphs = paragraphs
         docs = [f"{p.title} {p.text}" for p in paragraphs]
-        
+
         self._doc_emb = _embed(docs, "passage: ") if docs else None
 
     def search(
@@ -124,7 +118,7 @@ class E5Retriever:
             return []
         q = _embed([query], "query: ")[0]
         sims = self._doc_emb @ q
-        
+
         order = sorted(
             (i for i in range(len(self.paragraphs)) if i not in exclude_idx),
             key=lambda i: (-float(sims[i]), i),
@@ -134,9 +128,7 @@ class E5Retriever:
 
 class E5Scorer:
 
-    def __init__(self, passage_texts: list[str], query: str, **_ignore):
-        
-        
+    def __init__(self, query: str):
         self._q = _embed([query], "query: ")[0]
 
     def score(self, text: str) -> float:
@@ -160,5 +152,5 @@ def make_scorer(kind: str, passage_texts: list[str], query: str):
     if kind == "bm25":
         return LexicalScorer(passage_texts, query)
     if kind == "e5":
-        return E5Scorer(passage_texts, query)
+        return E5Scorer(query)
     raise ValueError(f"unknown scorer kind {kind!r}; choose 'bm25' or 'e5'")

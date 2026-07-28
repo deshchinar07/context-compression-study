@@ -59,7 +59,7 @@ def _from_hotpot(row: dict) -> Example:
 
 
 def _from_2wiki(row: dict) -> Example:
-    
+
     context = json.loads(row["context"]) if isinstance(row["context"], str) else row["context"]
     sf = row["supporting_facts"]
     sf = json.loads(sf) if isinstance(sf, str) else sf
@@ -173,7 +173,7 @@ def build_multi_objective(
             questions.append(ex.questions[0])
             answers.append(ex.answers[0])
             for p in ex.paragraphs:
-                
+
                 if p.title in seen_titles:
                     if p.is_supporting:
                         seen_titles[p.title].is_supporting = True
@@ -208,8 +208,8 @@ def load_examples(
     seed: int = 0,
     cache_dir: str = "data",
 ) -> List[Example]:
-    
-    
+
+
     singles = load_single(dataset, split=split, cache_dir=cache_dir, limit=None)
     if n_objectives <= 1:
         out = singles

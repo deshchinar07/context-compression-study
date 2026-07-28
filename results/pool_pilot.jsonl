@@ -1,1 +1,0 @@
-{"_meta": {"backbone": "Qwen/Qwen2.5-7B-Instruct", "base_url": "https://api.deepinfra.com/v1/openai", "temperature": 0.0, "tokenizer": "transformers:Qwen/Qwen2.5-7B-Instruct", "retrieval": "bm25", "topk": 3, "max_steps": 8, "summary_max_words": 40, "seed": 0, "primary_metric_protocol": "mem1_table", "diagnostic_metric_protocol": "standard_qa"}}

@@ -122,7 +122,7 @@ class LLMBackend:
                     stop=stop,
                 )
                 text = resp.choices[0].message.content or ""
-                
+
                 if assistant_prefix and not text.startswith(assistant_prefix):
                     text = assistant_prefix + text
                 if resp.usage:
@@ -130,5 +130,6 @@ class LLMBackend:
                 return text
             except Exception as e:
                 last_err = e
-                time.sleep(min(2 ** attempt, 30))
+                if attempt < self.max_retries - 1:
+                    time.sleep(min(2 ** attempt, 30))
         raise RuntimeError(f"LLM call failed after {self.max_retries} retries: {last_err}")

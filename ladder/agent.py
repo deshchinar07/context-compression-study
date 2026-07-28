@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .blocks import Block, Context, OBSERVATION, QUESTION
+from .blocks import Block, Context, OBSERVATION, QUESTION, SUMMARY
 from .data import Example
 from .llm import (
     LLMBackend,
@@ -82,7 +82,7 @@ def _force_answer(backend: LLMBackend, ctx: Context) -> str:
     pred = _clean_answer(out)
     if pred:
         return pred
-    
+
     out = backend.complete(
         ctx.render_prompt() + FORCE_ANSWER_RETRY_CUE,
         stop=["</answer>"],
@@ -164,7 +164,7 @@ class ReActAgent:
             )
             kind, payload = _parse_action(out)
 
-            
+
             if kind is None and not commit_nudge_used:
                 commit_nudge_used = True
                 out = self.backend.complete(
@@ -174,10 +174,10 @@ class ReActAgent:
                     assistant_prefix="<answer>",
                 )
                 kind, payload = _parse_action(out)
-                
-                
+
+
                 if kind is None:
-                    
+
                     bare = (out or "").replace("<answer>", "").replace("</answer>", "").strip()
                     if bare and "<think>" not in bare and "<search>" not in bare:
                         kind, payload = "answer", bare
@@ -192,7 +192,7 @@ class ReActAgent:
                     break
                 continue
 
-            
+
             break
 
         if not answered:
@@ -201,7 +201,8 @@ class ReActAgent:
         u1 = self.backend.usage
         supporting_total = len(gold_titles)
         supporting_kept = sum(
-            1 for b in ctx.blocks if b.role == OBSERVATION and b.is_supporting
+            1 for b in ctx.blocks
+            if b.role in (OBSERVATION, SUMMARY) and b.is_supporting
         )
 
         return RunResult(

@@ -19,7 +19,7 @@ class Block:
     role: str
     text: str
     step_idx: int
-    objective_idx: int = -1         
+    objective_idx: int = -1
     is_supporting: Optional[bool] = None
     source_title: Optional[str] = None
     n_tokens: int = 0

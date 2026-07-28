@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import string
+import warnings
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Sequence
@@ -194,6 +195,22 @@ def _mean(xs: List[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
+def _warn_if_unmatched(key: tuple, by_policy: Dict[str, List[dict]]) -> None:
+    id_sets = {p: {r["example_id"] for r in rs} for p, rs in by_policy.items()}
+    if len(id_sets) < 2:
+        return
+    shared = set.intersection(*id_sets.values())
+    extra = {p: len(ids) - len(shared) for p, ids in id_sets.items() if len(ids) != len(shared)}
+    if extra:
+        warnings.warn(
+            f"{key}: rungs were not run on the same examples "
+            f"({ {p: len(i) for p, i in id_sets.items()} }; {len(shared)} shared). "
+            "Gaps between rungs mix different example sets and are not strictly "
+            "comparable -- re-run the missing cells or filter to the shared ids.",
+            stacklevel=3,
+        )
+
+
 def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
     groups: Dict[tuple, Dict[str, List[dict]]] = defaultdict(lambda: defaultdict(list))
     for r in rows:
@@ -202,6 +219,7 @@ def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
 
     out: Dict[tuple, Dict[str, dict]] = {}
     for key, by_policy in groups.items():
+        _warn_if_unmatched(key, by_policy)
         out[key] = {}
         for pol, rs in by_policy.items():
             missing = [metric for metric in SCORE_METRICS if metric not in rs[0]]
@@ -227,8 +245,8 @@ def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
                         for x in rs
                     ]
                 ),
-                
-                
+
+
                 "gold_recall": _mean(
                     [
                         (x["gold_titles_retrieved"] / x["gold_titles_total"])
@@ -260,19 +278,20 @@ def format_report(
         lines.append(
             f"=== {dataset} | split={split} | N_obj={n_obj} | budget={budget} ==="
         )
-        header = f"{'rung':<8}{'n':>5}{'  '}{metric:>9}{'%oracle':>9}{'peakTok':>9}{'inferTok':>9}{'compr':>7}{'summ':>6}{'suppKept':>9}{'recall':>8}"
+        w = max(9, len(metric))
+        header = f"{'rung':<8}{'n':>5}{'  '}{metric:>{w}}{'%oracle':>9}{'peakTok':>9}{'inferTok':>9}{'compr':>7}{'summ':>6}{'suppKept':>9}{'recall':>8}"
         lines.append(header)
         for p in present:
             m = by_pol[p]
             oracle_val = by_pol.get("Oracle", {}).get(metric, 0.0)
             pct = (100.0 * m[metric] / oracle_val) if oracle_val else float("nan")
             lines.append(
-                f"{p:<8}{m['n']:>5}  {m[metric]:>9.4f}{pct:>9.1f}{m['peak_tokens']:>9.0f}"
+                f"{p:<8}{m['n']:>5}  {m[metric]:>{w}.4f}{pct:>9.1f}{m['peak_tokens']:>9.0f}"
                 f"{m['infer_tokens']:>9.0f}{m['compress_dropped']:>7.1f}"
                 f"{m['compress_summarized']:>6.1f}{m['supp_kept_frac']:>9.2f}"
                 f"{m['gold_recall']:>8.2f}"
             )
-        
+
         def g(a, b):
             if a in by_pol and b in by_pol:
                 return by_pol[b][metric] - by_pol[a][metric]

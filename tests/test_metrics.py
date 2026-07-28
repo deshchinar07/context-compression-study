@@ -16,7 +16,7 @@ from ladder.report import (
 
 
 def test_protocol_normalization_differs_as_expected():
-    
+
     assert standard_qa_normalize("The  Beatles!") == "beatles"
     assert mem1_normalize("The  Beatles!") == "the beatles"
 

@@ -40,8 +40,8 @@ def test_h0_can_discard_the_question():
     p = H0()
     for i, name in enumerate(["A", "B", "C"], start=1):
         p.on_append(ctx, _obs(i, name))
-    
-    
+
+
     roles = [b.role for b in ctx.blocks]
     assert QUESTION not in roles, "H0 must be able to drop the question"
     assert ctx.used() <= ctx.budget
@@ -79,7 +79,7 @@ def test_h3_summarizes_and_anchors_recent():
     p.on_append(ctx, _obs(3, "C"), scorer=scorer, summarizer=summ)
     assert p.stats.summarized >= 1, "H3 must attempt summarization before deleting"
     assert ctx.blocks[0].role == QUESTION, "H3 must keep the question"
-    
+
     titles = [b.source_title for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
     assert "B" in titles, "H3 must anchor the most-recent observation"
 
@@ -99,6 +99,36 @@ def test_oracle_is_the_only_rung_reading_gold():
     assert Oracle.uses_gold is True
     for cls in (H0, H1, H2, H3):
         assert cls.uses_gold is False
+
+
+def test_supporting_kept_counts_summarized_blocks():
+    """Summarized supporting evidence must count as kept (agent.py counter)."""
+    import ladder.agent as agent_mod
+
+    src = open(agent_mod.__file__, encoding="utf-8").read()
+    assert "b.role in (OBSERVATION, SUMMARY) and b.is_supporting" in src
+
+    ctx = Context(budget=70, blocks=[_q(tok=5)])
+    p = H3()
+    scorer = DummyScorer({})
+    summ = DummySummarizer(note="tiny note")
+    for i, title in enumerate(["A", "B", "C"], start=1):
+        p.on_append(
+            ctx,
+            _obs(i, title, tok=25, supporting=True),
+            scorer=scorer,
+            summarizer=summ,
+        )
+    assert any(b.role == SUMMARY and b.is_supporting for b in ctx.blocks), (
+        "expected a surviving SUMMARY that retains is_supporting"
+    )
+    counted = sum(
+        1 for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY) and b.is_supporting
+    )
+    obs_only = sum(
+        1 for b in ctx.blocks if b.role == OBSERVATION and b.is_supporting
+    )
+    assert counted > obs_only
 
 
 if __name__ == "__main__":
