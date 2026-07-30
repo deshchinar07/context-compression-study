@@ -1,21 +1,24 @@
 # Heuristic Ladder
 
-A controlled harness for decomposing *where* the gains of learned context compression come from. It runs a five-rung **heuristic ladder** on a single frozen backbone with a fixed retrieval and action space, so the only variable across rungs is the compression policy. The central question: how much of the benefit that RL-trained folding methods (MEM1, BACM-RL/FoldAct, PEEK) attribute to *learning* is already recoverable by training-free heuristics, once budget-awareness and selection are isolated?
+A controlled harness for decomposing *where* the gains of learned context compression come from. It runs a six-rung **heuristic ladder** (H0, H0p, H1–H3, Oracle) on a single frozen backbone with a fixed retrieval and action space, so the only variable across rungs is the compression policy. The central question: how much of the benefit that RL-trained folding methods (MEM1, BACM-RL/FoldAct, PEEK) attribute to *learning* is already recoverable by training-free heuristics, once pinning, timing, and selection are isolated?
 
 ## Findings
 
-Two independent BM25 runs of the same grid (seed 0 vs. a full re-run under the corrected harness; see `results/rerun/`) give a direct measure of run-to-run noise under a hosted backbone. Against that noise floor:
+![Decomposition gaps (HotpotQA N=2, B=512)](results/figures/ladder_gaps_b512.png)
 
-| gap | replicates? | note |
+The old H0→H1 gap bundled two changes (reactive→proactive *and* allowing the question to be dropped→pinning it). An intermediate rung **H0p** (reactive truncation, question pinned) unbundles them. Spot-check on HotpotQA, N=2, budget 512, **n=51** matched examples (`results/unbundle_hotpot_n2_b512.jsonl`; headline metric `mem1_table_summed_f1`):
+
+| gap | Δ F1 | note |
 |---|---|---|
-| **Timing (H0→H1)** | **Yes** | Largest effect when the budget binds; same sign in 13/14 matched groups; effect ~3× run-to-run noise. |
-| Selection (H1→H2) | No | Mean effect below noise; sign flips in half the groups. |
-| Selection++ (H2→H3) | No | Same — not distinguishable from noise at n≤200 / one seed. |
-| Headroom (H3→Oracle) | Weak | Larger than selection, but still close to the noise floor. |
+| **Pinning (H0→H0p)** | **+0.37** | Dominates. H0 keeps the question on only ~25% of examples; H0p/H1 keep it on 100%. |
+| Timing (H0p→H1) | +0.02 | Near null once the question is pinned (8/8/35 up/down/tie). |
+| Selection (H1→H2) | +0.12 | Positive here; prior full-grid BM25 re-runs put this within run-to-run noise — treat as unconfirmed at n=51 / one cell. |
+| Selection++ (H2→H3) | −0.13 | Negative on this cell; not established. |
+| Headroom (H3→Oracle) | +0.09 | Oracle is a **selection** ceiling given gold labels, not a timing ceiling. |
 
-**Takeaway.** When the budget binds, *when* you compress dominates *what* you keep. Claims about relevance-based selection or summarize-instead-of-delete should not be treated as established from a single seed. Absolute F1 against published tables is confounded (different retrieval setup and a hosted backbone); the object of this study is the rung-to-rung gaps.
+**Takeaway.** The large effect previously attributed to “timing” was mostly **question retention**. Pure timing (proactive vs reactive, both pinning) is small on this binding cell. Selection / summarize-instead-of-delete are not established from a single seed; absolute F1 next to published tables is confounded (pool retrieval + hosted DeepInfra backbone). The object of this study is the rung-to-rung gaps.
 
-The e5 sensitivity check (`results/*_e5.jsonl`) does not overturn the timing result.
+The earlier BM25 grid without H0p (`results/rerun/`) still measures hosted-backbone run-to-run noise; e5 (`results/*_e5.jsonl`) does not change the pinning story.
 
 ## The ladder
 
@@ -23,12 +26,13 @@ Each rung adds exactly one design decision, so every adjacent gap measures one t
 
 | transition | what it isolates |
 |---|---|
-| H0 → H1 | **Timing** — does acting before the budget overflows help at all? |
+| H0 → H0p | **Pinning** — does keeping the question under reactive truncation recover the collapse? |
+| H0p → H1 | **Timing** — does acting before overflow help, holding the pin fixed? |
 | H1 → H2 | **Selection** — does *what* you drop matter, holding timing fixed? |
 | H2 → H3 | **Selection++** — do anchoring plus summarize-instead-of-delete add more? |
-| H3 → Oracle | **Ceiling** — how much headroom is left to perfect selection? |
+| H3 → Oracle | **Ceiling** — how much headroom is left to perfect *selection* (gold-aware drop order)? |
 
-Learned methods are not a rung. They never decomposed timing from selection, so where they land relative to H3 and Oracle is the *finding*, not an input. This harness does not execute their code; comparing against their published numbers is a separate, confounded step and is left to future work. The internal gaps share one retriever, one backbone, and one prompt within a run.
+Learned methods are not a rung. They never decomposed pinning, timing, and selection, so where they land relative to H3 and Oracle is the *finding*, not an input. This harness does not execute their code; comparing against their published numbers is a separate, confounded step and is left to future work. The internal gaps share one retriever, one backbone, and one prompt within a run.
 
 ## Fairness invariants
 
@@ -41,7 +45,7 @@ These are enforced in code, not merely intended:
 - **Two scoring protocols, reported and never conflated.** `mem1_table` is the headline protocol — it matches MEM1's `eval.py` exactly (MEM1 preprocessing, set-based token F1, strict semicolon splitting, and zero for the whole example when the answer count is wrong). `standard_qa` is the SQuAD/HotpotQA-style diagnostic (Counter-based token F1 with forgiving pad/truncate behavior). (`ladder/report.py`)
 - **No per-dataset tuning.** The only dev-set knob is H3's summary length. The evaluation grid should be fixed before inspecting test-split results.
 
-One design choice, applied identically to all rungs: **only the evidence store (observation and summary blocks) is compressible.** The question is structural and the reasoning trace is transient, regenerated each turn from the evidence, so budget pressure comes purely from accumulated evidence — exactly what the compression literature targets. (`ladder/policies.py`)
+**H0** may drop any block under reactive truncation, including the question (logged as `question_kept`). From **H0p** upward, the question is pinned and only the evidence store (observation / summary blocks) is compressible; the reasoning trace is transient and regenerated each turn. Budget pressure is therefore from accumulated evidence — what the compression literature targets — once the pin is on. (`ladder/policies.py`)
 
 ## Installation
 
@@ -87,14 +91,14 @@ Official test splits have no public labels, so **`test` maps to the validation s
 # a quick pilot: 20 HotpotQA examples, all rungs, two binding budgets
 python -m ladder run \
   --datasets hotpotqa --splits test --n-objectives 1 \
-  --budgets 512,256 --policies H0,H1,H2,H3,Oracle \
+  --budgets 512,256 --policies H0,H0p,H1,H2,H3,Oracle \
   --limit 20 --out results/pilot.jsonl
 
-# grid matching the reported BM25 re-run (see results/rerun/)
+# unbundle spot-check (pinning vs timing; see Findings)
 python -m ladder run \
   --datasets hotpotqa --splits test --n-objectives 2 \
-  --budgets 512,1024,2048 --policies H0,H1,H2,H3,Oracle \
-  --limit 100 --seed 0 --out results/hotpot_n2.jsonl
+  --budgets 512 --policies H0,H0p,H1,H2,H3,Oracle \
+  --limit 55 --seed 0 --out results/unbundle_hotpot_n2_b512.jsonl
 ```
 
 Reported multi-objective budgets are **512 / 1024 / 2048** (binding on these pools). Larger budgets (e.g. 4k–16k) are where compression stops firing on single-hop-scale pools.
@@ -110,7 +114,7 @@ python -m ladder aggregate --results \
 python -m ladder aggregate --results results/rerun/rerun_hotpot_n2.jsonl --metric mem1_table_summed_f1
 ```
 
-For each `(dataset, split, n_objectives, budget)` group, the report prints every rung's score, its **% of the Oracle ceiling**, peak context tokens, mean inference tokens, compression counts, the **fraction of supporting evidence kept** (`suppKept`), and the four decomposition gaps.
+For each `(dataset, split, n_objectives, budget)` group, the report prints every rung's score, its **% of the Oracle ceiling**, peak context tokens, mean inference tokens, compression counts, the **fraction of supporting evidence kept** (`suppKept`), **question retention** (`qKept`), and the five decomposition gaps (pinning / timing / selection / selection++ / headroom).
 
 `aggregate` warns if rungs in a group were not run on the same example ids (a mismatch that existed in an older exploratory file; the `results/rerun/` shards are matched).
 
@@ -139,7 +143,7 @@ Every run records measured inference tokens (`prompt_tokens + completion_tokens`
 1. **Within-run gaps are comparable across rungs** — same retriever, backbone endpoint, and prompt.
 2. **Any number placed next to a published table is confounded** — those papers used whole-Wikipedia dense retrieval and often a different / RL-trained backbone; ours use a gold-plus-distractor pool on a hosted Qwen2.5-7B-Instruct.
 
-Re-running a learned checkpoint *inside this harness* is future work and is not wired in. Treat the rung decomposition (especially the replicated timing gap) as the contribution.
+Re-running a learned checkpoint *inside this harness* is future work and is not wired in. Treat the unbundled rung decomposition (especially pinning vs timing) as the contribution.
 
 ## Repository layout
 
@@ -150,7 +154,7 @@ ladder/
   tokenizer.py            token counting with the frozen Qwen2.5 tokenizer (BACKBONE_MODEL)
   data.py                 dataset loaders (HotpotQA, 2Wiki, MuSiQue) + multi-objective construction
   retrieval_scoring.py    BM25 + E5 retrievers and selection scorers
-  policies.py             H0-H3 + Oracle policies and the H3 query-focused summarizer
+  policies.py             H0, H0p, H1–H3 + Oracle policies and the H3 query-focused summarizer
   llm.py                  frozen-backbone LLM client and the ReAct prompt template
   agent.py                the fixed ReAct environment shared by all rungs
   report.py               mem1_table + standard_qa scoring, aggregation, decomposition report
@@ -159,12 +163,13 @@ tests/
   test_policies.py        offline behavioural tests for the compression rungs
   test_metrics.py         offline tests for the scoring protocols
 scripts/
-  plot_ladder_results.py  plots from the canonical re-run (+ e5 comparison from exploratory files)
+  plot_ladder_results.py  plots from the unbundle spot-check (+ e5 comparison from exploratory files)
   compare_e5_bm25.py      e5 vs bm25 on matched example ids
 data/                     normalized dataset caches (HotpotQA, 2Wiki)
 results/
-  rerun/                  canonical BM25 grid (8k rows; basis for Findings and main figures)
-  pool_*.jsonl            earlier exploratory BM25 / e5 runs (kept for e5 sensitivity)
+  unbundle_hotpot_n2_b512.jsonl   pinning-vs-timing spot-check (n=51; basis for Findings)
+  rerun/                  earlier BM25 grid without H0p (noise floor / e5 companion)
+  pool_*.jsonl            exploratory BM25 / e5 runs
   figures/                plots from scripts/plot_ladder_results.py
 .env.example
 requirements.txt
@@ -186,4 +191,4 @@ python tests/test_policies.py
 python tests/test_metrics.py
 ```
 
-Both are offline (no network, no API). They assert the behavioural difference between rungs — e.g. that H0 can discard the question, H1 pins it, H2 drops least-relevant (not oldest), H3 summarizes and anchors recency, the Oracle sheds distractors before gold evidence, and summarized supporting blocks count toward `final_supporting_kept`.
+Both are offline (no network, no API). They assert the behavioural difference between rungs — e.g. that H0 can discard the question, H0p pins it under reactive truncation, H1 is proactive with the pin, H2 drops least-relevant (not oldest), H3 summarizes and anchors recency, the Oracle sheds distractors before gold evidence, and summarized supporting blocks count toward `final_supporting_kept`.

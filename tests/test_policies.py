@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from ladder.blocks import Block, Context, QUESTION, OBSERVATION, SUMMARY
-from ladder.policies import H0, H1, H2, H3, Oracle
+from ladder.policies import H0, H0p, H1, H2, H3, Oracle
 
 
 class DummyScorer:
@@ -41,9 +41,18 @@ def test_h0_can_discard_the_question():
     for i, name in enumerate(["A", "B", "C"], start=1):
         p.on_append(ctx, _obs(i, name))
 
-
     roles = [b.role for b in ctx.blocks]
     assert QUESTION not in roles, "H0 must be able to drop the question"
+    assert ctx.used() <= ctx.budget
+
+
+def test_h0p_pins_question_under_overflow():
+    ctx = Context(budget=8, blocks=[_q(tok=4)])
+    p = H0p()
+    p.on_append(ctx, _obs(1, "A", tok=6))
+    p.on_append(ctx, _obs(2, "B", tok=6))
+    assert any(b.role == QUESTION for b in ctx.blocks), "H0p must pin the question"
+    assert p.stats.dropped >= 1, "H0p should drop observations to fit"
     assert ctx.used() <= ctx.budget
 
 
@@ -97,7 +106,7 @@ def test_oracle_keeps_supporting_drops_distractor():
 
 def test_oracle_is_the_only_rung_reading_gold():
     assert Oracle.uses_gold is True
-    for cls in (H0, H1, H2, H3):
+    for cls in (H0, H0p, H1, H2, H3):
         assert cls.uses_gold is False
 
 

@@ -7,7 +7,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-LADDER = ["H0", "H1", "H2", "H3", "Oracle"]
+LADDER = ["H0", "H0p", "H1", "H2", "H3", "Oracle"]
 METRIC = "mem1_table_summed_f1"
 
 
@@ -73,22 +73,29 @@ def n_examples(rows, **filt) -> int:
 
 
 def build_runs(results_dir: Path) -> list[dict]:
-    # Canonical BM25 grid: results/rerun/ (full re-run under the corrected harness).
+    # Unbundle spot-check (canonical for pinning vs timing) plus re-run cells that include H0p when present.
+    unbundle = results_dir / "unbundle_hotpot_n2_b512.jsonl"
     rerun = results_dir / "rerun"
-    hotpot_n1 = load_rows(rerun / "rerun_hotpot_n1.jsonl")
-    hotpot_n2 = load_rows(rerun / "rerun_hotpot_n2.jsonl")
-    hotpot_n8 = load_rows(rerun / "rerun_hotpot_n8.jsonl")
-    wiki_n2 = load_rows(rerun / "rerun_2wiki_n2.jsonl")
-    wiki_n8 = load_rows(rerun / "rerun_2wiki_n8.jsonl")
-
-    specs = [
-        ("Pool Hotpot N=1 B=512", hotpot_n1, dict(dataset="hotpotqa", n_objectives=1, budget=512)),
-        ("Pool Hotpot N=1 B=256", hotpot_n1, dict(dataset="hotpotqa", n_objectives=1, budget=256)),
-        ("Pool Hotpot N=2 B=512", hotpot_n2, dict(dataset="hotpotqa", n_objectives=2, budget=512)),
-        ("Pool Hotpot N=8 B=512", hotpot_n8, dict(dataset="hotpotqa", n_objectives=8, budget=512)),
-        ("Pool 2Wiki N=2 B=512", wiki_n2, dict(dataset="2wiki", n_objectives=2, budget=512)),
-        ("Pool 2Wiki N=8 B=512", wiki_n8, dict(dataset="2wiki", n_objectives=8, budget=512)),
-    ]
+    specs = []
+    if unbundle.exists():
+        rows = load_rows(unbundle)
+        specs.append(
+            ("Unbundle Hotpot N=2 B=512", rows, dict(dataset="hotpotqa", n_objectives=2, budget=512))
+        )
+    else:
+        hotpot_n1 = load_rows(rerun / "rerun_hotpot_n1.jsonl")
+        hotpot_n2 = load_rows(rerun / "rerun_hotpot_n2.jsonl")
+        hotpot_n8 = load_rows(rerun / "rerun_hotpot_n8.jsonl")
+        wiki_n2 = load_rows(rerun / "rerun_2wiki_n2.jsonl")
+        wiki_n8 = load_rows(rerun / "rerun_2wiki_n8.jsonl")
+        specs = [
+            ("Pool Hotpot N=1 B=512", hotpot_n1, dict(dataset="hotpotqa", n_objectives=1, budget=512)),
+            ("Pool Hotpot N=1 B=256", hotpot_n1, dict(dataset="hotpotqa", n_objectives=1, budget=256)),
+            ("Pool Hotpot N=2 B=512", hotpot_n2, dict(dataset="hotpotqa", n_objectives=2, budget=512)),
+            ("Pool Hotpot N=8 B=512", hotpot_n8, dict(dataset="hotpotqa", n_objectives=8, budget=512)),
+            ("Pool 2Wiki N=2 B=512", wiki_n2, dict(dataset="2wiki", n_objectives=2, budget=512)),
+            ("Pool 2Wiki N=8 B=512", wiki_n8, dict(dataset="2wiki", n_objectives=8, budget=512)),
+        ]
 
     runs = []
     for name, rows, filt in specs:
@@ -102,7 +109,8 @@ def build_runs(results_dir: Path) -> list[dict]:
                 "recall": mean_recall(rows, **filt),
                 "f1": means,
                 "gaps": {
-                    "timing": means["H1"] - means["H0"],
+                    "pinning": means["H0p"] - means["H0"],
+                    "timing": means["H1"] - means["H0p"],
                     "selection": means["H2"] - means["H1"],
                     "selection++": means["H3"] - means["H2"],
                     "headroom": means["Oracle"] - means["H3"],
@@ -199,13 +207,13 @@ def print_table(runs: list[dict]) -> None:
         cells = " ".join(f"{f1[p]:7.3f}" for p in LADDER)
         print(f"{run['name']:28} {run['n']:4d}  {cells}  {run['recall']:6.2f}")
     print()
-    print("Gaps (H0→H1 timing, H1→H2 selection, H2→H3 ++, H3→Oracle headroom)")
-    print(f"{'run':28}  {'tim':>7} {'sel':>7} {'sel++':>7} {'head':>7}")
+    print("Gaps (H0→H0p pinning, H0p→H1 timing, H1→H2 selection, H2→H3 ++, H3→Oracle headroom)")
+    print(f"{'run':28}  {'pin':>7} {'tim':>7} {'sel':>7} {'sel++':>7} {'head':>7}")
     for run in runs:
         g = run["gaps"]
         print(
-            f"{run['name']:28}  {g['timing']:+7.3f} {g['selection']:+7.3f} "
-            f"{g['selection++']:+7.3f} {g['headroom']:+7.3f}"
+            f"{run['name']:28}  {g['pinning']:+7.3f} {g['timing']:+7.3f} "
+            f"{g['selection']:+7.3f} {g['selection++']:+7.3f} {g['headroom']:+7.3f}"
         )
 
 
@@ -223,7 +231,7 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
     x = range(len(runs))
     width = 0.15
     for i, pol in enumerate(LADDER):
-        xs = [xi + (i - 2) * width for xi in x]
+        xs = [xi + (i - 2.5) * width for xi in x]
         ys = [run["f1"][pol] for run in runs]
         ax.bar(xs, ys, width, label=pol)
     ax.set_xticks(list(x))
@@ -256,11 +264,11 @@ def plot_runs(runs: list[dict], out_dir: Path) -> list[Path]:
 
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    gap_keys = ["timing", "selection", "selection++", "headroom"]
+    gap_keys = ["pinning", "timing", "selection", "selection++", "headroom"]
     x = range(len(focus))
-    width = 0.2
+    width = 0.16
     for i, gk in enumerate(gap_keys):
-        xs = [xi + (i - 1.5) * width for xi in x]
+        xs = [xi + (i - 2) * width for xi in x]
         ys = [run["gaps"][gk] for run in focus]
         ax.bar(xs, ys, width, label=gk)
     ax.axhline(0, color="black", linewidth=0.8)

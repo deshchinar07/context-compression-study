@@ -57,6 +57,7 @@ class RunResult:
     final_supporting_total: int = 0
     gold_titles_total: int = 0
     gold_titles_retrieved: int = 0
+    question_kept: bool = True
 
 
 def _parse_action(text: str):
@@ -204,6 +205,7 @@ class ReActAgent:
             1 for b in ctx.blocks
             if b.role in (OBSERVATION, SUMMARY) and b.is_supporting
         )
+        question_kept = any(b.role == QUESTION for b in ctx.blocks)
 
         return RunResult(
             example_id=example.id,
@@ -228,4 +230,5 @@ class ReActAgent:
             final_supporting_total=supporting_total,
             gold_titles_total=len(gold_titles),
             gold_titles_retrieved=len(retrieved_gold_titles),
+            question_kept=question_kept,
         )

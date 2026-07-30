@@ -61,6 +61,28 @@ class H0:
         self.stats.triggered += int(fired)
 
 
+class H0p:
+    """Reactive truncation like H0, but the question block is pinned."""
+
+    name = "H0p"
+    uses_gold = False
+
+    def __init__(self):
+        self.stats = CompressionStats()
+
+    def on_append(self, ctx: Context, pending: Block, *, scorer: Optional[LexicalScorer] = None, summarizer: Optional[Summarizer] = None, query: str = "") -> None:
+        ctx.blocks.append(pending)
+        fired = False
+        while ctx.used() > ctx.budget:
+            candidates = [b for b in ctx.blocks if b.role in (OBSERVATION, SUMMARY)]
+            if not candidates:
+                break
+            ctx.remove(candidates[0])
+            self.stats.dropped += 1
+            fired = True
+        self.stats.triggered += int(fired)
+
+
 class H1:
 
     name = "H1"
@@ -199,9 +221,9 @@ class Oracle:
         self.stats.triggered += int(fired)
 
 
-LADDER = {"H0": H0, "H1": H1, "H2": H2, "H3": H3, "Oracle": Oracle}
+LADDER = {"H0": H0, "H0p": H0p, "H1": H1, "H2": H2, "H3": H3, "Oracle": Oracle}
 
-Policy = Union[H0, H1, H2, H3, Oracle]
+Policy = Union[H0, H0p, H1, H2, H3, Oracle]
 
 
 def build_policy(name: str, summary_max_words: int = 40) -> Policy:

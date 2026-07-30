@@ -161,7 +161,7 @@ def score_prediction(
     )
 
 
-LADDER_ORDER = ["H0", "H1", "H2", "H3", "Oracle"]
+LADDER_ORDER = ["H0", "H0p", "H1", "H2", "H3", "Oracle"]
 SCORE_METRICS = [
     "mem1_table_summed_f1",
     "mem1_table_summed_em",
@@ -245,14 +245,15 @@ def aggregate(rows: List[dict]) -> Dict[tuple, Dict[str, dict]]:
                         for x in rs
                     ]
                 ),
-
-
                 "gold_recall": _mean(
                     [
                         (x["gold_titles_retrieved"] / x["gold_titles_total"])
                         if x.get("gold_titles_total") else 1.0
                         for x in rs
                     ]
+                ),
+                "question_kept": _mean(
+                    [float(bool(x.get("question_kept", True))) for x in rs]
                 ),
             }
             for metric in SCORE_METRICS:
@@ -279,7 +280,10 @@ def format_report(
             f"=== {dataset} | split={split} | N_obj={n_obj} | budget={budget} ==="
         )
         w = max(9, len(metric))
-        header = f"{'rung':<8}{'n':>5}{'  '}{metric:>{w}}{'%oracle':>9}{'peakTok':>9}{'inferTok':>9}{'compr':>7}{'summ':>6}{'suppKept':>9}{'recall':>8}"
+        header = (
+            f"{'rung':<8}{'n':>5}{'  '}{metric:>{w}}{'%oracle':>9}{'peakTok':>9}"
+            f"{'inferTok':>9}{'compr':>7}{'summ':>6}{'suppKept':>9}{'recall':>8}{'qKept':>7}"
+        )
         lines.append(header)
         for p in present:
             m = by_pol[p]
@@ -289,7 +293,7 @@ def format_report(
                 f"{p:<8}{m['n']:>5}  {m[metric]:>{w}.4f}{pct:>9.1f}{m['peak_tokens']:>9.0f}"
                 f"{m['infer_tokens']:>9.0f}{m['compress_dropped']:>7.1f}"
                 f"{m['compress_summarized']:>6.1f}{m['supp_kept_frac']:>9.2f}"
-                f"{m['gold_recall']:>8.2f}"
+                f"{m['gold_recall']:>8.2f}{m['question_kept']:>7.2f}"
             )
 
         def g(a, b):
@@ -298,7 +302,8 @@ def format_report(
             return float("nan")
         lines.append(
             "  gaps: "
-            f"timing(H0->H1)={g('H0','H1'):+.4f}  "
+            f"pinning(H0->H0p)={g('H0','H0p'):+.4f}  "
+            f"timing(H0p->H1)={g('H0p','H1'):+.4f}  "
             f"selection(H1->H2)={g('H1','H2'):+.4f}  "
             f"selection++(H2->H3)={g('H2','H3'):+.4f}  "
             f"headroom(H3->Oracle)={g('H3','Oracle'):+.4f}"

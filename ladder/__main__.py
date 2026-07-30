@@ -201,7 +201,7 @@ def build_parser():
     pr.add_argument("--splits", default="test")
     pr.add_argument("--n-objectives", dest="n_objectives", default="1")
     pr.add_argument("--budgets", default="1024")
-    pr.add_argument("--policies", default="H0,H1,H2,H3,Oracle")
+    pr.add_argument("--policies", default="H0,H0p,H1,H2,H3,Oracle")
     pr.add_argument("--limit", type=int, default=20)
     pr.add_argument("--seed", type=int, default=0)
     pr.add_argument("--out", default="results/run.jsonl")
