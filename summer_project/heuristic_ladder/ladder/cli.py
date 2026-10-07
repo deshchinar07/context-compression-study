@@ -1,0 +1,333 @@
+"""Command-line entrypoint: prepare-data, run, aggregate.
+
+Usage (from the heuristic_ladder/ directory):
+
+    python -m ladder prepare-data --datasets hotpotqa,2wiki,musique --splits test
+    python -m ladder run   --datasets hotpotqa --n-objectives 1 --budgets 1024,512 \
+                            --policies H0,H1,H2,H3,Oracle --limit 20 --out results/run.jsonl
+    python -m ladder aggregate --results results/run.jsonl
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+from .tokenizer import BACKBONE_MODEL
+
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Minimal .env loader (no dependency). Does not overwrite existing env vars."""
+    for candidate in (path, os.path.join("..", path)):
+        if os.path.exists(candidate):
+            for line in open(candidate, encoding="utf-8"):
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                v = v.strip().strip('"').strip("'")
+                os.environ.setdefault(k.strip(), v)
+            return
+
+
+def _csv(s: str):
+    return [x.strip() for x in s.split(",") if x.strip()]
+
+
+def _ints(s: str):
+    return [int(x) for x in _csv(s)]
+
+
+def cmd_prepare_data(args):
+    from .data import load_examples
+
+    for dataset in _csv(args.datasets):
+        for split in _csv(args.splits):
+            for n in _ints(args.n_objectives):
+                ex = load_examples(
+                    dataset, split=split, n_objectives=n,
+                    limit=args.limit, seed=args.seed, cache_dir=args.cache_dir,
+                )
+                print(f"{dataset}/{split} N={n}: {len(ex)} examples cached in {args.cache_dir}/")
+
+
+def cmd_run(args):
+    _load_dotenv()
+    from .llm import LLMBackend
+    from .runner import run_grid
+    from .tokenizer import BACKBONE_MODEL
+
+    if args.model != BACKBONE_MODEL:
+        # Token budgets are always computed with BACKBONE_MODEL's tokenizer
+        # (see ladder/tokenizer.py) -- there is no per-run tokenizer swap. Calling
+        # a different model here would silently make "budget=X tokens" mean a
+        # different thing than what was actually counted, which this harness
+        # refuses to do quietly.
+        raise SystemExit(
+            f"--model {args.model!r} does not match the fixed backbone "
+            f"{BACKBONE_MODEL!r} that ladder/tokenizer.py counts against. "
+            "This study is deliberately single-backbone; if you really want to "
+            "benchmark a different model, update BACKBONE_MODEL in "
+            "ladder/tokenizer.py so the tokenizer and the API calls stay in sync."
+        )
+
+    backend = LLMBackend(
+        model=args.model,
+        base_url=args.base_url,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+    )
+    run_grid(
+        datasets=_csv(args.datasets),
+        splits=_csv(args.splits),
+        n_objectives_list=_ints(args.n_objectives),
+        budgets=_ints(args.budgets),
+        policies=_csv(args.policies),
+        out_path=args.out,
+        limit=args.limit,
+        seed=args.seed,
+        backend=backend,
+        max_steps=args.max_steps,
+        topk=args.topk,
+        prompt_variant=args.prompt_variant,
+        summary_max_words=args.summary_max_words,
+        retrieval=args.retrieval,
+        retrieval_scope=args.retrieval_scope,
+        corpus_source=args.corpus_source,
+        corpus_index_dir=args.corpus_index_dir,
+        cache_dir=args.cache_dir,
+    )
+
+
+def cmd_run_baseline(args):
+    _load_dotenv()
+    from .llm import LLMBackend
+    from .runner import run_baseline_grid
+
+    if args.baseline == "mem1":
+        from .baselines.mem1 import MEM1Baseline, MEM1_CHECKPOINT
+
+        model = args.model or MEM1_CHECKPOINT
+        backend = LLMBackend(
+            model=model,
+            base_url=args.base_url,
+            api_key_env=args.api_key_env,
+            temperature=args.temperature,
+        )
+        baseline = MEM1Baseline(
+            backend=backend,
+            retrieval=args.retrieval,
+            topk=args.topk,
+            max_iterations=args.max_iterations,
+            retrieval_scope=args.retrieval_scope,
+        )
+    else:
+        raise SystemExit(f"unknown baseline {args.baseline!r}")
+
+    run_baseline_grid(
+        baseline,
+        datasets=_csv(args.datasets),
+        splits=_csv(args.splits),
+        n_objectives_list=_ints(args.n_objectives),
+        out_path=args.out,
+        limit=args.limit,
+        seed=args.seed,
+        corpus_source=args.corpus_source,
+        corpus_index_dir=args.corpus_index_dir,
+        cache_dir=args.cache_dir,
+    )
+
+
+def cmd_aggregate(args):
+    from .aggregate import report
+
+    if args.baselines and not os.path.exists(args.baselines):
+        raise SystemExit(f"--baselines {args.baselines!r} not found")
+    print(report(args.results, metric=args.metric, baselines_path=args.baselines))
+
+
+def build_parser():
+    p = argparse.ArgumentParser(prog="ladder", description="Heuristic-ladder harness")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    common_data = dict()
+
+    pd = sub.add_parser("prepare-data", help="download + cache datasets as local JSONL")
+    pd.add_argument("--datasets", default="hotpotqa,2wiki,musique")
+    pd.add_argument("--splits", default="test")
+    pd.add_argument("--n-objectives", dest="n_objectives", default="1")
+    pd.add_argument("--limit", type=int, default=None)
+    pd.add_argument("--seed", type=int, default=0)
+    pd.add_argument("--cache-dir", default="data")
+    pd.set_defaults(func=cmd_prepare_data)
+
+    pr = sub.add_parser("run", help="run the experiment grid")
+    pr.add_argument("--datasets", default="hotpotqa")
+    pr.add_argument("--splits", default="test")
+    pr.add_argument("--n-objectives", dest="n_objectives", default="1")
+    pr.add_argument("--budgets", default="1024")
+    pr.add_argument("--policies", default="H0,H1,H2,H3,Oracle")
+    pr.add_argument("--limit", type=int, default=20)
+    pr.add_argument("--seed", type=int, default=0)
+    pr.add_argument("--out", default="results/run.jsonl")
+    pr.add_argument("--cache-dir", default="data")
+    pr.add_argument("--model", default=BACKBONE_MODEL)
+    pr.add_argument("--base-url", default="https://api.deepinfra.com/v1/openai")
+    pr.add_argument("--temperature", type=float, default=0.0)
+    pr.add_argument("--max-tokens", type=int, default=512)
+    pr.add_argument("--max-steps", type=int, default=8)
+    pr.add_argument("--topk", type=int, default=3)
+    pr.add_argument("--prompt-variant", default="v0")
+    pr.add_argument("--summary-max-words", type=int, default=40)
+    pr.add_argument(
+        "--retrieval",
+        default="bm25",
+        choices=["bm25", "e5"],
+        help=(
+            "Ranking backend shared by retrieval and the selection scorer. 'bm25' "
+            "(default) is sparse and dependency-free; 'e5' is the intfloat/e5-base-v2 "
+            "dense retriever Search-R1/MEM1 use (needs sentence-transformers). Pick "
+            "the one that matches the baseline you are comparing against."
+        ),
+    )
+    pr.add_argument(
+        "--retrieval-scope",
+        dest="retrieval_scope",
+        default="pool",
+        choices=["pool", "corpus"],
+        help=(
+            "'pool' (default): retrieve from each example's ~10-paragraph bundled "
+            "pool with dataset gold labels (easy retrieval, exact Oracle). 'corpus': "
+            "retrieve from one shared index; gold is assigned by title match at "
+            "retrieval time, so retrieval can miss the gold and the Oracle becomes "
+            "'perfect selection given retrieval' (gold-retrieval recall is recorded "
+            "per row). See ladder/corpus.py."
+        ),
+    )
+    pr.add_argument(
+        "--corpus-source",
+        dest="corpus_source",
+        default="union",
+        choices=["union", "kilt"],
+        help=(
+            "Only used with --retrieval-scope corpus. 'union' (default): the "
+            "deduplicated union of the split's own paragraphs (local, no download). "
+            "'kilt': the full Wikipedia FAISS/e5 index (Stage 2; needs --corpus-index-dir)."
+        ),
+    )
+    pr.add_argument(
+        "--corpus-index-dir",
+        dest="corpus_index_dir",
+        default=None,
+        help=(
+            "Only used with --corpus-source kilt: path to the prebuilt FAISS index "
+            "directory (index.faiss + passages.jsonl). See ladder/kilt.py."
+        ),
+    )
+    pr.set_defaults(func=cmd_run)
+
+    rb = sub.add_parser(
+        "run-baseline",
+        help="run a learned baseline (e.g. MEM1) in-harness against our retriever",
+    )
+    rb.add_argument("--baseline", default="mem1", choices=["mem1"])
+    rb.add_argument("--datasets", default="hotpotqa")
+    rb.add_argument("--splits", default="test")
+    rb.add_argument("--n-objectives", dest="n_objectives", default="2")
+    rb.add_argument("--limit", type=int, default=20)
+    rb.add_argument("--seed", type=int, default=0)
+    rb.add_argument("--out", default="results/mem1_baseline.jsonl")
+    rb.add_argument("--cache-dir", default="data")
+    rb.add_argument(
+        "--model",
+        default=None,
+        help="served checkpoint id; defaults to the baseline's own (e.g. MEM1's release).",
+    )
+    rb.add_argument(
+        "--base-url",
+        default="http://localhost:8000/v1",
+        help="OpenAI-compatible endpoint that serves /v1/completions (e.g. local vLLM).",
+    )
+    rb.add_argument("--api-key-env", default="DEEPINFRA_API_KEY")
+    rb.add_argument("--temperature", type=float, default=0.0)
+    rb.add_argument("--topk", type=int, default=3)
+    rb.add_argument("--max-iterations", type=int, default=6)
+    rb.add_argument(
+        "--retrieval",
+        default="bm25",
+        choices=["bm25", "e5"],
+        help="Must match the retrieval used for the ladder run you compare against.",
+    )
+    rb.add_argument(
+        "--retrieval-scope",
+        dest="retrieval_scope",
+        default="pool",
+        choices=["pool", "corpus"],
+        help=(
+            "Must match the ladder run you compare against. 'corpus' puts the "
+            "baseline on the same shared index as the ladder (fair comparison); "
+            "'pool' (default) uses each example's bundled pool."
+        ),
+    )
+    rb.add_argument(
+        "--corpus-source",
+        dest="corpus_source",
+        default="union",
+        choices=["union", "kilt"],
+        help="Only used with --retrieval-scope corpus (see `run`).",
+    )
+    rb.add_argument(
+        "--corpus-index-dir",
+        dest="corpus_index_dir",
+        default=None,
+        help="Only used with --corpus-source kilt: path to the prebuilt FAISS index dir.",
+    )
+    rb.set_defaults(func=cmd_run_baseline)
+
+    ag = sub.add_parser("aggregate", help="summarize a results file")
+    ag.add_argument("--results", required=True,
+                    help="one path, or comma-separated (e.g. ladder.jsonl,mem1.jsonl)")
+    ag.add_argument(
+        "--metric",
+        default="both",
+        choices=[
+            "both",
+            "mem1_table_mean_f1",
+            "mem1_table_mean_em",
+            "mem1_table_summed_f1",
+            "mem1_table_summed_em",
+            "standard_qa_mean_f1",
+            "standard_qa_mean_em",
+            "standard_qa_summed_f1",
+            "standard_qa_summed_em",
+        ],
+        help=(
+            "Default 'both' reports headline mem1_table_summed_f1 first (the key "
+            "directly comparable to MEM1's reported F1) and diagnostic "
+            "standard_qa_mean_f1 second. standard_qa_* is diagnostic only."
+        ),
+    )
+    ag.add_argument(
+        "--baselines",
+        default=None,
+        help=(
+            "Optional path to a published-baselines JSON (e.g. "
+            "configs/published_baselines.json). When given, matching learned/RL "
+            "numbers are overlaid per group and the retrieval-scope / backbone "
+            "caveats are printed automatically. Unverified (null-score) entries "
+            "print as TODO, never as numbers."
+        ),
+    )
+    ag.set_defaults(func=cmd_aggregate)
+
+    return p
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
